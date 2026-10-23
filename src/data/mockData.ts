@@ -1,0 +1,227 @@
+import type { PetStatus, Task, Reminder, WorkSummary, NavigationItem } from '../types';
+
+export const initialPetStatus: PetStatus = {
+  name: 'Kuro',
+  model: 'Kuro Companion Core (Model-01)',
+  avatarVariant: 'Cyan OLED Curved',
+  batteryLevel: 88,
+  isCharging: false,
+  hardwareConnected: false, // Phase 1 Software Simulator
+  currentMood: 'attentive',
+  mode: 'Focus Companion',
+  lastSynced: 'Just now (Local virtual cycle)',
+  temperatureCelsius: 24.2,
+  virtualUptime: '4h 12m',
+};
+
+export const initialTasks: Task[] = [
+  {
+    id: 'task-1',
+    title: 'Review firmware architecture doc for robot ESP32 microcontroller',
+    category: 'robot',
+    priority: 'high',
+    dueDate: 'Today',
+    dueTime: '5:00 PM',
+    estimatedMinutes: 45,
+    completed: false,
+    tags: ['Phase 3', 'Hardware', 'Architecture'],
+    description: 'Verify pinout mappings for OLED I2C display and dual servo head articulation.',
+  },
+  {
+    id: 'task-2',
+    title: 'Design initial user routine schedule for morning reminders',
+    category: 'work',
+    priority: 'medium',
+    dueDate: 'Today',
+    dueTime: '6:30 PM',
+    estimatedMinutes: 30,
+    completed: false,
+    tags: ['Productivity', 'Routines'],
+    description: 'Set trigger conditions for posture checks, eye strain breaks, and water reminders.',
+  },
+  {
+    id: 'task-3',
+    title: 'Prepare presentation deck for Q4 robotics companion milestone',
+    category: 'work',
+    priority: 'urgent',
+    dueDate: 'Tomorrow',
+    dueTime: '11:00 AM',
+    estimatedMinutes: 90,
+    completed: false,
+    tags: ['Milestone', 'Roadmap'],
+    description: 'Include Phase 1 Web UI screenshots and assistant persona specification.',
+  },
+  {
+    id: 'task-4',
+    title: 'Order test 1.5-inch 128x64 I2C OLED display breakout modules',
+    category: 'robot',
+    priority: 'low',
+    dueDate: 'Oct 26',
+    dueTime: '2:00 PM',
+    estimatedMinutes: 15,
+    completed: true,
+    tags: ['Procurement', 'Hardware'],
+    description: 'Purchased 2 units for display simulation testing.',
+  },
+  {
+    id: 'task-5',
+    title: 'Read deep work chapter on cognitive load minimization',
+    category: 'learning',
+    priority: 'medium',
+    dueDate: 'Oct 28',
+    dueTime: '8:00 PM',
+    estimatedMinutes: 40,
+    completed: false,
+    tags: ['Focus', 'Reading'],
+    description: 'Apply learnings to Kuro’s distraction detection logic.',
+  },
+];
+
+export const initialReminders: Reminder[] = [
+  {
+    id: 'rem-1',
+    title: 'Posture check & desk stretch (2 mins)',
+    time: '20 mins left',
+    type: 'wellness',
+    priority: 'normal',
+    done: false,
+  },
+  {
+    id: 'rem-2',
+    title: 'Hydration break — Kuro will chirp gentle chime',
+    time: 'In 45 mins',
+    type: 'pet-routine',
+    priority: 'normal',
+    done: false,
+  },
+  {
+    id: 'rem-3',
+    title: 'Sprint sync & task priority review',
+    time: '4:30 PM',
+    type: 'meeting',
+    priority: 'important',
+    done: false,
+  },
+  {
+    id: 'rem-4',
+    title: 'Daily productivity reflection & log backup',
+    time: '7:00 PM',
+    type: 'task',
+    priority: 'normal',
+    done: false,
+  },
+];
+
+export const initialWorkSummary: WorkSummary = {
+  focusMinutesToday: 165, // 2h 45m
+  focusGoalMinutes: 240, // 4h 00m
+  completedTasksToday: 4,
+  totalTasksToday: 7,
+  streakDays: 5,
+  productivityScore: 84,
+  dailyDistribution: [
+    { day: 'Mon', hours: 3.5 },
+    { day: 'Tue', hours: 4.2 },
+    { day: 'Wed', hours: 2.8 },
+    { day: 'Thu', hours: 3.9 },
+    { day: 'Fri', hours: 2.75 },
+    { day: 'Sat', hours: 1.2 },
+    { day: 'Sun', hours: 0.5 },
+  ],
+};
+
+export const navigationItems: NavigationItem[] = [
+  { id: 'dashboard', label: 'Dashboard', description: 'Overview, pet status & daily productivity' },
+  { id: 'pet-studio', label: 'Pet Studio', description: 'Avatar expressions, personality & face preview' },
+  { id: 'assistant', label: 'Personal Assistant', description: 'Interactive AI companion conversation & actions' },
+  { id: 'tasks', label: 'Tasks & Projects', description: 'Active tasks, project boards & backlog' },
+  { id: 'reminders', label: 'Reminders & Calendar', description: 'Time-sensitive alerts, agenda & routines' },
+  { id: 'work-tracking', label: 'Work Tracking', description: 'Focus timers, Pomodoro & telemetry logs' },
+  { id: 'daily-reports', label: 'Daily Reports', description: 'Productivity analytics & end-of-day summaries' },
+  { id: 'ai-memory', label: 'AI & Memory', description: 'Long-term context, user preferences & facts' },
+  { id: 'integrations', label: 'Integrations', description: 'External tools, smart home & hardware link' },
+  { id: 'settings', label: 'Settings & Privacy', description: 'Preferences, local storage & display options' },
+];
+
+export const sampleMemoryItems = [
+  {
+    id: 'mem-1',
+    category: 'Work Routine',
+    fact: 'Alex prefers deep focus blocks between 9:30 AM and 12:00 PM with zero non-critical alerts.',
+    confidence: '98%',
+    source: 'Observed Pattern',
+    lastUpdated: 'Yesterday',
+  },
+  {
+    id: 'mem-2',
+    category: 'Pet Preference',
+    fact: 'Avatar eye style preferred: Cyan Curved OLED with gentle blink animation.',
+    confidence: '100%',
+    source: 'User Setting',
+    lastUpdated: '3 days ago',
+  },
+  {
+    id: 'mem-3',
+    category: 'Health Habit',
+    fact: 'Regular reminder intervals for hydration set to every 45 minutes during active sessions.',
+    confidence: '95%',
+    source: 'Explicit Rule',
+    lastUpdated: '1 week ago',
+  },
+  {
+    id: 'mem-4',
+    category: 'Key Project',
+    fact: 'Smart Robot Pet project: Phase 1 is Web UI, Phase 2 is AI & Services, Phase 3 is Physical Hardware.',
+    confidence: '100%',
+    source: 'Project Specification',
+    lastUpdated: 'Today',
+  },
+];
+
+export const sampleIntegrations = [
+  {
+    id: 'esp32-robot',
+    name: 'Kuro Physical Robot (ESP32)',
+    category: 'Hardware',
+    status: 'Planned (Phase 3)',
+    description: 'Bi-directional Bluetooth & WiFi protocol for head motor articulation and OLED display control.',
+    icon: 'Bot',
+    badgeClass: 'badge-warning',
+  },
+  {
+    id: 'google-cal',
+    name: 'Google Calendar',
+    category: 'Calendar & Reminders',
+    status: 'Planned (Phase 2)',
+    description: 'Sync personal events, meetings, and block calendar for automated focus sessions.',
+    icon: 'Calendar',
+    badgeClass: 'badge-neutral',
+  },
+  {
+    id: 'obsidian-vault',
+    name: 'Obsidian / Local Markdown',
+    category: 'Knowledge Base',
+    status: 'Planned (Phase 2)',
+    description: 'Read daily logs and write Kuro assistant summaries into your local markdown vault.',
+    icon: 'FileText',
+    badgeClass: 'badge-neutral',
+  },
+  {
+    id: 'home-assistant',
+    name: 'Home Assistant',
+    category: 'Smart Home',
+    status: 'Planned (Phase 3)',
+    description: 'Control desk lighting and ambient mood triggers based on focus sessions and pet status.',
+    icon: 'Home',
+    badgeClass: 'badge-neutral',
+  },
+  {
+    id: 'spotify',
+    name: 'Spotify Audio',
+    category: 'Media & Ambience',
+    status: 'Planned (Phase 2)',
+    description: 'Trigger low-fi focus playlists when Kuro enters Focus Companion mode.',
+    icon: 'Music',
+    badgeClass: 'badge-neutral',
+  },
+];
