@@ -1,39 +1,122 @@
 import React, { useState } from 'react';
 import type { PetStatus, PetMood } from '../types';
+import type { ClientPetSettings } from '../lib/adapters';
 import { PetFacePreview } from '../components/pet/PetFacePreview';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
-import { Cpu, Sliders, Volume2, Eye } from 'lucide-react';
+import { Cpu, Sliders, Volume2, Eye, Check, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 
 interface PetStudioPageProps {
   petStatus: PetStatus;
   currentMood: PetMood;
   onMoodChange: (mood: PetMood) => void;
+  petSettings: ClientPetSettings;
+  loading?: boolean;
+  saving?: boolean;
+  error?: string | null;
+  onUpdatePetSettings: (newSettings: Partial<ClientPetSettings>) => Promise<boolean>;
+  onRetry?: () => void;
 }
 
 export const PetStudioPage: React.FC<PetStudioPageProps> = ({
   petStatus,
   currentMood,
   onMoodChange,
+  petSettings,
+  loading = false,
+  saving = false,
+  error = null,
+  onUpdatePetSettings,
+  onRetry,
 }) => {
-  const [selectedEyeShape, setSelectedEyeShape] = useState<'curved' | 'round' | 'pixel'>('curved');
-  const [selectedColor, setSelectedColor] = useState<'cyan' | 'emerald' | 'amber' | 'violet'>('cyan');
+  const [nameInput, setNameInput] = useState<string | null>(null);
   const [volumeLevel, setVolumeLevel] = useState(65);
-  const [playfulness, setPlayfulness] = useState(70);
-  const [focusDiscipline, setFocusDiscipline] = useState(85);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const displayedPetName = nameInput ?? petSettings.petName;
+
+  const handleNameBlur = () => {
+    if (nameInput !== null && nameInput.trim() && nameInput.trim() !== petSettings.petName) {
+      void onUpdatePetSettings({ petName: nameInput.trim() }).then((ok) => {
+        if (ok) triggerSuccessBadge();
+      });
+    }
+    setNameInput(null);
+  };
+
+  const triggerSuccessBadge = () => {
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+  };
+
+  const handleShapeChange = (shape: 'curved' | 'round' | 'pixel') => {
+    void onUpdatePetSettings({ eyeShape: shape }).then((ok) => {
+      if (ok) triggerSuccessBadge();
+    });
+  };
+
+  const handleColorChange = (color: 'cyan' | 'emerald' | 'amber' | 'violet') => {
+    void onUpdatePetSettings({ glowColor: color }).then((ok) => {
+      if (ok) triggerSuccessBadge();
+    });
+  };
+
+  const handlePlayfulnessChange = (val: number) => {
+    void onUpdatePetSettings({ playfulness: val }).then((ok) => {
+      if (ok) triggerSuccessBadge();
+    });
+  };
+
+  const handleFocusDisciplineChange = (val: number) => {
+    void onUpdatePetSettings({ focusDiscipline: val }).then((ok) => {
+      if (ok) triggerSuccessBadge();
+    });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 1: Visual Studio Preview"
-        title="Digital Avatar & Expression Studio"
-        description="Configure your robot companion's digital face, colorway, and personality parameters. Physical ESP32 servo motor calibration and hardware OLED flashing will be activated in Phase 3."
+        phase="Phase 2: Persistent Settings"
+        title="Digital Avatar &amp; Expression Studio"
+        description="Configure your robot companion's digital face, colorway, and personality parameters. Settings are persisted to Supabase for your authenticated account."
       />
+
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            padding: '12px 16px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-red)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={18} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+            <span style={{ fontSize: '13px' }}>{error}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onRetry}
+              style={{ padding: '4px 10px', fontSize: '12px' }}
+            >
+              <RefreshCw size={12} />
+              <span>Retry</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="dashboard-grid">
         {/* Left Column: Interactive Face Visor Preview */}
         <div className="col-6">
           <PetFacePreview
-            petStatus={petStatus}
+            petStatus={{ ...petStatus, name: petSettings.petName }}
             currentMood={currentMood}
             onMoodChange={onMoodChange}
             interactive={true}
@@ -83,9 +166,44 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
                   <p className="card-subtitle">Custom eye geometry &amp; pixel styles</p>
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {saving && (
+                  <span className="badge badge-neutral" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Saving...
+                  </span>
+                )}
+                {saveSuccess && (
+                  <span className="badge badge-active" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Check size={11} /> Saved
+                  </span>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>
+                  Companion Name
+                </label>
+                <input
+                  type="text"
+                  value={displayedPetName}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onBlur={handleNameBlur}
+                  placeholder="Companion Name..."
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                  }}
+                />
+              </div>
+
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>
                   Eye Shape Geometry
@@ -95,8 +213,9 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
                     <button
                       key={shape}
                       type="button"
-                      className={`expression-btn ${selectedEyeShape === shape ? 'active' : ''}`}
-                      onClick={() => setSelectedEyeShape(shape)}
+                      disabled={loading || saving}
+                      className={`expression-btn ${petSettings.eyeShape === shape ? 'active' : ''}`}
+                      onClick={() => handleShapeChange(shape)}
                       style={{ textTransform: 'capitalize' }}
                     >
                       {shape === 'curved' ? 'Curved OLED' : shape === 'round' ? 'Circular Dome' : 'Retro Pixel'}
@@ -114,8 +233,9 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
                     <button
                       key={color}
                       type="button"
-                      className={`expression-btn ${selectedColor === color ? 'active' : ''}`}
-                      onClick={() => setSelectedColor(color)}
+                      disabled={loading || saving}
+                      className={`expression-btn ${petSettings.glowColor === color ? 'active' : ''}`}
+                      onClick={() => handleColorChange(color)}
                       style={{ textTransform: 'capitalize' }}
                     >
                       {color}
@@ -142,14 +262,15 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
                   <span>Focus Discipline</span>
-                  <span className="mono">{focusDiscipline}%</span>
+                  <span className="mono">{petSettings.focusDiscipline}%</span>
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="100"
-                  value={focusDiscipline}
-                  onChange={(e) => setFocusDiscipline(Number(e.target.value))}
+                  disabled={loading || saving}
+                  value={petSettings.focusDiscipline}
+                  onChange={(e) => handleFocusDisciplineChange(Number(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                 />
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -160,14 +281,15 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
                   <span>Playfulness &amp; Reactivity</span>
-                  <span className="mono">{playfulness}%</span>
+                  <span className="mono">{petSettings.playfulness}%</span>
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="100"
-                  value={playfulness}
-                  onChange={(e) => setPlayfulness(Number(e.target.value))}
+                  disabled={loading || saving}
+                  value={petSettings.playfulness}
+                  onChange={(e) => handlePlayfulnessChange(Number(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                 />
               </div>
@@ -175,7 +297,7 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Volume2 size={14} /> Chime Volume
+                    <Volume2 size={14} /> Chime Volume (Local Only)
                   </span>
                   <span className="mono">{volumeLevel}%</span>
                 </div>

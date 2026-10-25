@@ -10,7 +10,7 @@ interface GreetingBannerProps {
 
 export const GreetingBanner: React.FC<GreetingBannerProps> = ({
   petStatus,
-  userName = 'Alex',
+  userName = 'User',
   pendingTasksCount,
 }) => {
   const [currentDate] = React.useState(() => new Date());
@@ -23,6 +23,8 @@ export const GreetingBanner: React.FC<GreetingBannerProps> = ({
     timeGreeting = 'Good evening';
   }
 
+  const headingGreeting = userName ? `${timeGreeting}, ${userName}` : `${timeGreeting}, Welcome`;
+
   const formattedDate = currentDate.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'short',
@@ -30,16 +32,21 @@ export const GreetingBanner: React.FC<GreetingBannerProps> = ({
     year: 'numeric',
   });
 
+  const pendingText =
+    pendingTasksCount === 0
+      ? 'no pending tasks'
+      : `${pendingTasksCount} pending task${pendingTasksCount === 1 ? '' : 's'}`;
+
   return (
     <div className="greeting-card">
       <div className="greeting-text-area">
         <h2 className="greeting-heading">
-          {timeGreeting}, {userName}
+          {headingGreeting}
           <span style={{ fontSize: '20px' }}>👋</span>
         </h2>
         <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)' }}>
           {petStatus.name} is in <strong style={{ color: 'var(--accent-primary)' }}>{petStatus.mode}</strong>.
-          You have <strong style={{ color: 'var(--text-primary)' }}>{pendingTasksCount} pending tasks</strong> scheduled for today.
+          You have <strong style={{ color: 'var(--text-primary)' }}>{pendingText}</strong> scheduled for today.
         </p>
         <div className="greeting-meta" style={{ marginTop: '4px' }}>
           <div className="meta-item">

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { PageId, Theme, PetStatus, PetMood } from '../../types';
-import { Menu, Moon, Sun, Bot, ShieldCheck } from 'lucide-react';
+import { Menu, Moon, Sun, Bot, LogIn, LogOut, User as UserIcon } from 'lucide-react';
+import { useAuth } from '../../context/useAuth';
 
 interface HeaderProps {
   currentPage: PageId;
@@ -11,6 +12,7 @@ interface HeaderProps {
   onOpenMobileMenu: () => void;
   petStatus: PetStatus;
   currentMood: PetMood;
+  onOpenAuthModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,7 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMobileMenu,
   petStatus,
   currentMood,
+  onOpenAuthModal,
 }) => {
+  const { user, signOut } = useAuth();
   return (
     <header className="app-header">
       <div className="header-left">
@@ -51,11 +55,52 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="mono">{petStatus.batteryLevel}%</span>
         </div>
 
-        {/* Phase 1 Local Mode Indicator */}
-        <div className="header-pet-pill" style={{ display: 'none' /* Will show on large displays */ }}>
-          <ShieldCheck size={14} style={{ color: 'var(--status-green)' }} />
-          <span>Local UI Phase 1</span>
-        </div>
+        {/* User Account / Auth Actions */}
+        {user ? (
+          <div className="header-pet-pill" style={{ gap: '6px' }} title={`Signed in as ${user.email}`}>
+            <UserIcon size={14} style={{ color: 'var(--accent-primary)' }} />
+            <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.email?.split('@')[0]}
+            </span>
+            <button
+              type="button"
+              onClick={() => signOut()}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '2px',
+                marginLeft: '2px',
+              }}
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut size={13} />
+            </button>
+          </div>
+        ) : (
+          onOpenAuthModal && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onOpenAuthModal}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              title="Sign in or create account"
+            >
+              <LogIn size={14} />
+              <span>Sign In</span>
+            </button>
+          )
+        )}
 
         {/* Theme Toggle Button */}
         <button

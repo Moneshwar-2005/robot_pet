@@ -52,7 +52,7 @@ export const DailyReportsPage: React.FC = () => {
 
         <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--text-primary)', marginBottom: '20px', padding: '16px', backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
           <p style={{ marginBottom: '10px' }}>
-            <strong>Executive Summary:</strong> Alex, today was a highly productive engineering day. You accomplished 2.8 hours of deep uninterrupted work focusing on the Phase 1 software architecture of our robot pet companion.
+            <strong>Executive Summary:</strong> User, today was a highly productive engineering day. You accomplished 2.8 hours of deep uninterrupted work focusing on the Phase 1 software architecture of our robot pet companion.
           </p>
           <p>
             Your energy was highest during the morning block between 10:00 AM and 12:30 PM. You successfully marked off 4 tasks, including the OLED display breakout procurement and the navigation framework.

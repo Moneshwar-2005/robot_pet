@@ -11,12 +11,19 @@ interface DashboardPageProps {
   currentMood: PetMood;
   onMoodChange: (mood: PetMood) => void;
   tasks: Task[];
+  tasksLoading?: boolean;
+  tasksError?: string | null;
   onToggleTask: (taskId: string) => void;
   onAddTask: (newTask: Omit<Task, 'id'>) => void;
+  onRetryTasks?: () => void;
   reminders: Reminder[];
+  remindersLoading?: boolean;
+  remindersError?: string | null;
   onToggleReminder: (reminderId: string) => void;
+  onRetryReminders?: () => void;
   workSummary: WorkSummary;
   onNavigate: (page: PageId) => void;
+  userName?: string;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -24,12 +31,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   currentMood,
   onMoodChange,
   tasks,
+  tasksLoading = false,
+  tasksError = null,
   onToggleTask,
   onAddTask,
+  onRetryTasks,
   reminders,
+  remindersLoading = false,
+  remindersError = null,
   onToggleReminder,
+  onRetryReminders,
   workSummary,
   onNavigate,
+  userName = 'User',
 }) => {
   const pendingTasksCount = tasks.filter((t) => !t.completed).length;
 
@@ -38,7 +52,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* Dynamic Greeting & Current Date Banner */}
       <GreetingBanner
         petStatus={petStatus}
-        userName="Alex"
+        userName={userName}
         pendingTasksCount={pendingTasksCount}
       />
 
@@ -48,9 +62,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="col-7" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <TasksWidget
             tasks={tasks}
+            loading={tasksLoading}
+            error={tasksError}
             onToggleTask={onToggleTask}
             onAddTask={onAddTask}
             onViewAll={() => onNavigate('tasks')}
+            onRetry={onRetryTasks}
           />
 
           <WorkSummaryWidget
@@ -72,8 +89,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           {/* Upcoming Reminders & Wellness Alerts */}
           <RemindersWidget
             reminders={reminders}
+            loading={remindersLoading}
+            error={remindersError}
             onToggleReminder={onToggleReminder}
             onViewAll={() => onNavigate('reminders')}
+            onRetry={onRetryReminders}
           />
         </div>
       </div>

@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
 import type { Task, TaskPriority } from '../../types';
-import { CheckSquare, Check, Plus, Filter, Tag } from 'lucide-react';
+import { formatTaskDeadline } from '../../lib/formatters';
+import { CheckSquare, Check, Plus, Filter, Tag, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 
 interface TasksWidgetProps {
   tasks: Task[];
+  loading?: boolean;
+  error?: string | null;
   onToggleTask: (taskId: string) => void;
   onAddTask: (newTask: Omit<Task, 'id'>) => void;
   onViewAll?: () => void;
+  onRetry?: () => void;
 }
 
 export const TasksWidget: React.FC<TasksWidgetProps> = ({
   tasks,
+  loading = false,
+  error = null,
   onToggleTask,
   onAddTask,
   onViewAll,
+  onRetry,
 }) => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'robot'>('all');
   const [quickTitle, setQuickTitle] = useState('');
@@ -38,7 +45,7 @@ export const TasksWidget: React.FC<TasksWidgetProps> = ({
       category: 'work',
       priority: quickPriority,
       dueDate: 'Today',
-      dueTime: 'End of day',
+      dueTime: null,
       estimatedMinutes: 25,
       completed: false,
       tags: ['Quick Task'],
@@ -96,6 +103,38 @@ export const TasksWidget: React.FC<TasksWidgetProps> = ({
           )}
         </div>
       </div>
+
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            padding: '8px 12px',
+            marginBottom: '12px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-red)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <AlertCircle size={14} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onRetry}
+              style={{ padding: '2px 8px', fontSize: '11px' }}
+            >
+              <RefreshCw size={10} /> Retry
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -182,7 +221,7 @@ export const TasksWidget: React.FC<TasksWidgetProps> = ({
                 style={{ padding: '4px 10px', fontSize: '11px' }}
                 disabled={!quickTitle.trim()}
               >
-                Save to Local State
+                Save Task
               </button>
             </div>
           </div>
@@ -191,7 +230,13 @@ export const TasksWidget: React.FC<TasksWidgetProps> = ({
 
       {/* Task List */}
       <div className="task-list-wrapper">
-        {filteredTasks.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">
+            <Loader2 className="empty-state-icon" style={{ animation: 'spin 1s linear infinite' }} />
+            <div className="empty-state-title">Loading tasks...</div>
+            <p className="empty-state-desc">Connecting to your database.</p>
+          </div>
+        ) : filteredTasks.length === 0 ? (
           <div className="empty-state">
             <CheckSquare className="empty-state-icon" />
             <div className="empty-state-title">No tasks found in this view</div>
@@ -213,7 +258,7 @@ export const TasksWidget: React.FC<TasksWidgetProps> = ({
                 <span className="task-title">{task.title}</span>
                 <div className="task-meta">
                   {getPriorityBadge(task.priority)}
-                  <span>Due {task.dueDate} at {task.dueTime}</span>
+                  <span>{formatTaskDeadline(task.dueDate, task.dueTime)}</span>
                   <span>•</span>
                   <span>~{task.estimatedMinutes}m</span>
                   {task.tags.map((tag) => (

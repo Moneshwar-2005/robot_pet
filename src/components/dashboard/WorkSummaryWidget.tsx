@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { WorkSummary } from '../../types';
 import { Timer, Flame, Award, Play, Pause, RotateCcw } from 'lucide-react';
 
@@ -7,12 +7,30 @@ interface WorkSummaryWidgetProps {
   onViewWorkTracking?: () => void;
 }
 
+const currentDayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()];
+
 export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
   workSummary,
   onViewWorkTracking,
 }) => {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [sessionSeconds, setSessionSeconds] = useState(25 * 60); // 25m Pomodoro
+
+  useEffect(() => {
+    if (!isTimerRunning) return;
+
+    const interval = setInterval(() => {
+      setSessionSeconds((prev) => {
+        if (prev <= 1) {
+          setIsTimerRunning(false);
+          return 25 * 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
 
   // Toggle local simulator timer
   const toggleTimer = () => {
@@ -32,10 +50,10 @@ export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
 
   const hoursToday = (workSummary.focusMinutesToday / 60).toFixed(1);
   const goalHours = (workSummary.focusGoalMinutes / 60).toFixed(1);
-  const progressPercent = Math.min(
-    100,
-    Math.round((workSummary.focusMinutesToday / workSummary.focusGoalMinutes) * 100)
-  );
+  const progressPercent =
+    workSummary.focusGoalMinutes > 0
+      ? Math.min(100, Math.round((workSummary.focusMinutesToday / workSummary.focusGoalMinutes) * 100))
+      : 0;
 
   return (
     <div className="card">
@@ -76,7 +94,9 @@ export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
             <Flame size={18} style={{ color: 'var(--status-amber)' }} />
             <span className="metric-value">{workSummary.streakDays}d</span>
           </div>
-          <span className="metric-sub">Daily target met</span>
+          <span className="metric-sub">
+            {workSummary.streakDays > 0 ? 'Daily target met' : 'Start streak today'}
+          </span>
         </div>
 
         <div className="metric-stat-box">
@@ -85,7 +105,13 @@ export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
             <Award size={18} style={{ color: 'var(--accent-primary)' }} />
             <span className="metric-value">{workSummary.productivityScore}%</span>
           </div>
-          <span className="metric-sub">High efficiency</span>
+          <span className="metric-sub">
+            {workSummary.productivityScore >= 80
+              ? 'High efficiency'
+              : workSummary.productivityScore > 0
+              ? 'In progress'
+              : 'No sessions yet'}
+          </span>
         </div>
 
         <div className="metric-stat-box">
@@ -93,7 +119,13 @@ export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
           <span className="metric-value">
             {workSummary.completedTasksToday}/{workSummary.totalTasksToday}
           </span>
-          <span className="metric-sub">Across 3 projects</span>
+          <span className="metric-sub">
+            {workSummary.totalTasksToday === 0
+              ? 'No tasks created'
+              : workSummary.completedTasksToday === workSummary.totalTasksToday
+              ? 'All tasks completed'
+              : `${workSummary.totalTasksToday - workSummary.completedTasksToday} remaining`}
+          </span>
         </div>
       </div>
 
@@ -101,11 +133,11 @@ export const WorkSummaryWidget: React.FC<WorkSummaryWidgetProps> = ({
       <div style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
           <span>Weekly Focus Distribution (Hours)</span>
-          <span>Today: Fri ({hoursToday}h)</span>
+          <span>Today: {currentDayName} ({hoursToday}h)</span>
         </div>
         <div className="mini-chart">
           {workSummary.dailyDistribution.map((item) => {
-            const isToday = item.day === 'Fri';
+            const isToday = item.day === currentDayName;
             const maxHour = 5;
             const barHeight = Math.min(100, (item.hours / maxHour) * 100);
             return (

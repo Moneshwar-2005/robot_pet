@@ -1,17 +1,24 @@
 import React from 'react';
 import type { Reminder } from '../../types';
-import { CalendarClock, Bell, Heart, Coffee, Users, Check } from 'lucide-react';
+import { formatReminderDisplay } from '../../lib/formatters';
+import { CalendarClock, Bell, Heart, Coffee, Users, Check, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 
 interface RemindersWidgetProps {
   reminders: Reminder[];
+  loading?: boolean;
+  error?: string | null;
   onToggleReminder: (reminderId: string) => void;
   onViewAll?: () => void;
+  onRetry?: () => void;
 }
 
 export const RemindersWidget: React.FC<RemindersWidgetProps> = ({
   reminders,
+  loading = false,
+  error = null,
   onToggleReminder,
   onViewAll,
+  onRetry,
 }) => {
   const getReminderIcon = (type: Reminder['type']) => {
     switch (type) {
@@ -68,8 +75,46 @@ export const RemindersWidget: React.FC<RemindersWidgetProps> = ({
         )}
       </div>
 
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            padding: '8px 12px',
+            marginBottom: '12px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-red)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <AlertCircle size={14} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onRetry}
+              style={{ padding: '2px 8px', fontSize: '11px' }}
+            >
+              <RefreshCw size={10} /> Retry
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="reminder-list">
-        {activeReminders.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">
+            <Loader2 className="empty-state-icon" style={{ animation: 'spin 1s linear infinite' }} />
+            <div className="empty-state-title">Loading reminders...</div>
+            <p className="empty-state-desc">Connecting to your scheduled alerts.</p>
+          </div>
+        ) : activeReminders.length === 0 ? (
           <div className="empty-state">
             <Bell className="empty-state-icon" />
             <div className="empty-state-title">No upcoming reminders</div>
@@ -82,7 +127,7 @@ export const RemindersWidget: React.FC<RemindersWidgetProps> = ({
                 {getReminderIcon(reminder.type)}
                 <div>
                   <div className="reminder-title">{reminder.title}</div>
-                  <div className="reminder-time">{reminder.time}</div>
+                  <div className="reminder-time">{formatReminderDisplay(reminder.time)}</div>
                 </div>
               </div>
 

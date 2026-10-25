@@ -34,8 +34,8 @@ export interface Task {
   title: string;
   category: TaskCategory;
   priority: TaskPriority;
-  dueDate: string;
-  dueTime: string;
+  dueDate: string | null;
+  dueTime: string | null;
   estimatedMinutes: number;
   completed: boolean;
   tags: string[];

@@ -13,6 +13,7 @@ interface AppLayoutProps {
   currentMood: PetMood;
   pendingTasksCount: number;
   upcomingRemindersCount: number;
+  onOpenAuthModal?: () => void;
   children: React.ReactNode;
 }
 
@@ -25,6 +26,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   currentMood,
   pendingTasksCount,
   upcomingRemindersCount,
+  onOpenAuthModal,
   children,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -61,6 +63,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onOpenMobileMenu={() => setMobileOpen(true)}
           petStatus={petStatus}
           currentMood={currentMood}
+          onOpenAuthModal={onOpenAuthModal}
         />
 
         <main className="page-container">{children}</main>

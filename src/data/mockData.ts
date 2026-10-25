@@ -147,7 +147,7 @@ export const sampleMemoryItems = [
   {
     id: 'mem-1',
     category: 'Work Routine',
-    fact: 'Alex prefers deep focus blocks between 9:30 AM and 12:00 PM with zero non-critical alerts.',
+    fact: 'User prefers deep focus blocks between 9:30 AM and 12:00 PM with zero non-critical alerts.',
     confidence: '98%',
     source: 'Observed Pattern',
     lastUpdated: 'Yesterday',

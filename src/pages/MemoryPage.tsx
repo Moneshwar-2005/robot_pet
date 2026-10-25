@@ -1,54 +1,126 @@
 import React, { useState } from 'react';
-import { sampleMemoryItems } from '../data/mockData';
+import type { ClientMemory } from '../lib/adapters';
+import { formatConfidence } from '../lib/formatters';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
-import { Brain, Search, Plus, Trash2, Filter } from 'lucide-react';
+import { Brain, Search, Plus, Trash2, Filter, AlertCircle, RefreshCw, Loader2, Pencil, Check, X } from 'lucide-react';
 
-export const MemoryPage: React.FC = () => {
-  const [memories, setMemories] = useState(sampleMemoryItems);
+interface MemoryPageProps {
+  memories: ClientMemory[];
+  loading?: boolean;
+  error?: string | null;
+  onAddMemory: (data: { category: string; fact: string; confidence?: number; source?: string }) => Promise<boolean>;
+  onEditMemory?: (id: string, updates: { category?: string; fact?: string; confidence?: number }) => Promise<boolean>;
+  onDeleteMemory: (id: string) => Promise<boolean>;
+  onRetry?: () => void;
+}
+
+export const MemoryPage: React.FC<MemoryPageProps> = ({
+  memories,
+  loading = false,
+  error = null,
+  onAddMemory,
+  onEditMemory,
+  onDeleteMemory,
+  onRetry,
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [newFact, setNewFact] = useState('');
   const [newCategory, setNewCategory] = useState('Work Routine');
   const [showAdd, setShowAdd] = useState(false);
 
+  // Editing state for an individual memory
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editFact, setEditFact] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+
   const filteredMemories = memories.filter((m) => {
     const matchesCategory = selectedCategory === 'all' || m.category === selectedCategory;
-    const matchesSearch = m.fact.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          m.category.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch =
+      m.fact.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.category.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
-  const handleAddMemory = (e: React.FormEvent) => {
+  const handleCreateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFact.trim()) return;
 
-    setMemories([
-      {
-        id: `mem-${Date.now()}`,
-        category: newCategory,
-        fact: newFact.trim(),
-        confidence: '100%',
-        source: 'User Manual Entry',
-        lastUpdated: 'Just now',
-      },
-      ...memories,
-    ]);
+    const ok = await onAddMemory({
+      category: newCategory,
+      fact: newFact.trim(),
+      confidence: 1.0,
+      source: 'User Manual Entry',
+    });
 
-    setNewFact('');
-    setShowAdd(false);
+    if (ok) {
+      setNewFact('');
+      setShowAdd(false);
+    }
   };
 
-  const handleDeleteMemory = (id: string) => {
-    setMemories(memories.filter((m) => m.id !== id));
+  const handleStartEdit = (mem: ClientMemory) => {
+    setEditingId(mem.id);
+    setEditFact(mem.fact);
+    setEditCategory(mem.category);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditFact('');
+    setEditCategory('');
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editFact.trim() || !onEditMemory) return;
+    const ok = await onEditMemory(id, {
+      fact: editFact.trim(),
+      category: editCategory.trim(),
+    });
+    if (ok) {
+      setEditingId(null);
+    }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 1: Local Context Store"
+        phase="Phase 2: Persistent AI Memory"
         title="Long-Term AI Memory &amp; Knowledge Graph"
-        description="Inspect and curate the facts, habits, and preferences Kuro uses to personalize interactions. Vector embeddings and semantic recall via local LLM will be integrated in Phase 2."
+        description="Inspect and curate the facts, habits, and preferences Kuro uses to personalize interactions. Authenticated records are stored in your database; local demo mode is active when signed out."
       />
+
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            padding: '12px 16px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-red)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={18} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+            <span style={{ fontSize: '13px' }}>{error}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onRetry}
+              style={{ padding: '4px 10px', fontSize: '12px' }}
+            >
+              <RefreshCw size={12} />
+              <span>Retry</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Action Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -101,7 +173,7 @@ export const MemoryPage: React.FC = () => {
 
       {showAdd && (
         <form
-          onSubmit={handleAddMemory}
+          onSubmit={handleCreateMemory}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -117,6 +189,7 @@ export const MemoryPage: React.FC = () => {
             placeholder="Fact or preference to remember (e.g. Needs coffee before 10 AM)..."
             value={newFact}
             onChange={(e) => setNewFact(e.target.value)}
+            autoFocus
             style={{
               padding: '8px 12px',
               background: 'var(--bg-input)',
@@ -145,6 +218,9 @@ export const MemoryPage: React.FC = () => {
             <button type="submit" className="btn btn-primary" disabled={!newFact.trim()}>
               Save Memory
             </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setShowAdd(false)}>
+              Cancel
+            </button>
           </div>
         </form>
       )}
@@ -159,44 +235,130 @@ export const MemoryPage: React.FC = () => {
           <span className="badge badge-neutral">{filteredMemories.length} memories loaded</span>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {filteredMemories.map((mem) => (
-            <div
-              key={mem.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                padding: '12px 14px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className="badge badge-phase">{mem.category}</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Confidence: {mem.confidence} • Source: {mem.source}
-                  </span>
-                </div>
-                <div style={{ fontSize: '13.5px', color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {mem.fact}
-                </div>
-              </div>
+        {loading ? (
+          <div className="empty-state">
+            <Loader2 className="empty-state-icon" style={{ animation: 'spin 1s linear infinite' }} />
+            <div className="empty-state-title">Loading companion memories...</div>
+            <p className="empty-state-desc">Fetching personalized facts from your database.</p>
+          </div>
+        ) : filteredMemories.length === 0 ? (
+          <div className="empty-state">
+            <Brain className="empty-state-icon" />
+            <div className="empty-state-title">No companion memories found</div>
+            <p className="empty-state-desc">Click "Add Fact" above to store personalized habits, rules, and preferences.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {filteredMemories.map((mem) => {
+              const isEditing = editingId === mem.id;
 
-              <button
-                type="button"
-                className="reminder-action-btn"
-                style={{ marginLeft: '12px' }}
-                onClick={() => handleDeleteMemory(mem.id)}
-                title="Remove from memory"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
+              return (
+                <div
+                  key={mem.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="badge badge-phase">{mem.category}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Confidence: {formatConfidence(mem.confidence)} • Source: {mem.source}
+                      </span>
+                    </div>
+
+                    {isEditing ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                        <input
+                          type="text"
+                          value={editFact}
+                          onChange={(e) => setEditFact(e.target.value)}
+                          autoFocus
+                          style={{
+                            padding: '6px 10px',
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: 'var(--radius-sm)',
+                            color: 'var(--text-primary)',
+                            fontSize: '13px',
+                          }}
+                        />
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <input
+                            type="text"
+                            value={editCategory}
+                            onChange={(e) => setEditCategory(e.target.value)}
+                            placeholder="Category..."
+                            style={{
+                              padding: '4px 8px',
+                              background: 'var(--bg-input)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--text-primary)',
+                              fontSize: '12px',
+                              width: '160px',
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                            onClick={() => handleSaveEdit(mem.id)}
+                            disabled={!editFact.trim()}
+                          >
+                            <Check size={12} /> Save
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                            onClick={handleCancelEdit}
+                          >
+                            <X size={12} /> Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '13.5px', color: 'var(--text-primary)', marginTop: '2px' }}>
+                        {mem.fact}
+                      </div>
+                    )}
+                  </div>
+
+                  {!isEditing && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px' }}>
+                      {onEditMemory && (
+                        <button
+                          type="button"
+                          className="reminder-action-btn"
+                          onClick={() => handleStartEdit(mem)}
+                          title="Edit fact"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="reminder-action-btn"
+                        onClick={() => onDeleteMemory(mem.id)}
+                        title="Remove from memory"
+                        style={{ color: 'var(--status-red)' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

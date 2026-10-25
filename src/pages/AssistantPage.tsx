@@ -1,188 +1,910 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
-import { Bot, Send, User, Sparkles, Mic } from 'lucide-react';
+import {
+  Bot,
+  Send,
+  User,
+  Sparkles,
+  Mic,
+  RotateCcw,
+  Trash2,
+  AlertCircle,
+  Square,
+  Loader2,
+  Cpu,
+  RefreshCw,
+  Terminal,
+  Plus,
+  History,
+  MessageSquare,
+  Check,
+  Edit2,
+  ChevronLeft,
+} from 'lucide-react';
+import { useOllamaChat } from '../hooks/useOllamaChat';
+import { useAuth } from '../context/useAuth';
+import { ActionProposalCard } from '../components/assistant/ActionProposalCard';
+import type { Task, Reminder, PageId } from '../types';
+import type { ActionProposal, TaskProposalPayload, ReminderProposalPayload } from '../lib/assistantActions';
 
-interface ChatMessage {
-  id: string;
-  sender: 'user' | 'assistant';
-  text: string;
-  timestamp: string;
-  isSimulated?: boolean;
+interface AssistantPageProps {
+  onAddTask?: (newTaskData: Omit<Task, 'id'>) => Promise<void>;
+  onAddReminder?: (newReminderData: Omit<Reminder, 'id'>) => Promise<void>;
+  onNavigate?: (page: PageId) => void;
 }
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: 'm-1',
-    sender: 'assistant',
-    text: "Hello Alex! I am Kuro, your Smart Robot Pet & Personal Productivity Assistant. Right now you are running Phase 1 of our project (Web UI Shell). When Phase 2 launches, I'll connect to our multi-modal AI backend to organize your calendar, track your tasks, and emote through my physical OLED face!",
-    timestamp: '9:00 AM',
-  },
-  {
-    id: 'm-2',
-    sender: 'user',
-    text: 'What are my top priorities for this afternoon?',
-    timestamp: '1:15 PM',
-  },
-  {
-    id: 'm-3',
-    sender: 'assistant',
-    text: "You have 3 priority items: (1) Review the ESP32 microcontroller firmware architecture at 5:00 PM, (2) Finalize morning routine reminders at 6:30 PM, and (3) Stretch and drink water in 20 minutes.",
-    timestamp: '1:15 PM',
-  },
-];
+export const AssistantPage: React.FC<AssistantPageProps> = ({
+  onAddTask,
+  onAddReminder,
+  onNavigate,
+}) => {
+  const { user } = useAuth();
+  const isAuthUser = Boolean(user);
+  const userEmail = user?.email || null;
 
-export const AssistantPage: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const {
+    connectionState,
+    models,
+    selectedModel,
+    connectionError,
+    connectionGuidance,
+    conversations,
+    activeConversationId,
+    activeConversation,
+    messages,
+    isLoading,
+    refreshConnection,
+    selectModel,
+    startNewConversation,
+    selectConversation,
+    deleteConversation,
+    clearAllConversations,
+    renameConversation,
+    updateProposalStatus,
+    sendMessage,
+    retryLastMessage,
+    cancelRequest,
+    activeBaseUrl,
+  } = useOllamaChat();
+
   const [inputValue, setInputValue] = useState('');
+  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [convToDelete, setConvToDelete] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
-
-    const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text: inputValue.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    if (!inputValue.trim() || isLoading) return;
+    const text = inputValue;
     setInputValue('');
-
-    // Local simulated assistant response clearly acknowledging Phase 1
-    setTimeout(() => {
-      const assistantMsg: ChatMessage = {
-        id: `msg-reply-${Date.now()}`,
-        sender: 'assistant',
-        text: `[Local UI Echo] I received: "${userMsg.text}". In Phase 2, this input will be processed by our conversational intelligence model.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isSimulated: true,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    }, 500);
+    sendMessage(text);
   };
 
-  const handleQuickCommand = (command: string) => {
-    setInputValue(command);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+  };
+
+  const handleQuickCommand = (prompt: string) => {
+    setInputValue(prompt);
+  };
+
+  const formatModelSize = (bytes?: number): string => {
+    if (!bytes || bytes <= 0) return '';
+    const gb = bytes / (1024 * 1024 * 1024);
+    return `${gb.toFixed(1)} GB`;
+  };
+
+  // Action Confirmation Handlers
+  const handleConfirmAction = async (msgId: string, proposal: ActionProposal) => {
+    updateProposalStatus(msgId, 'executing');
+
+    try {
+      if (proposal.actionType === 'create_task') {
+        if (!onAddTask) {
+          throw new Error('Task creation service is currently unavailable.');
+        }
+
+        const p = proposal.payload as TaskProposalPayload;
+        const taskPayload: Omit<Task, 'id'> = {
+          title: p.title,
+          category: p.category,
+          priority: p.priority,
+          dueDate: p.dueDate,
+          dueTime: p.dueTime,
+          estimatedMinutes: p.estimatedMinutes,
+          completed: false,
+          tags: [],
+          description: p.description,
+        };
+
+        await onAddTask(taskPayload);
+        updateProposalStatus(msgId, 'confirmed');
+      } else if (proposal.actionType === 'create_reminder') {
+        if (!onAddReminder) {
+          throw new Error('Reminder creation service is currently unavailable.');
+        }
+
+        const p = proposal.payload as ReminderProposalPayload;
+        const reminderPayload: Omit<Reminder, 'id'> = {
+          title: p.title,
+          time: p.time,
+          type: p.type,
+          priority: p.priority,
+          done: false,
+        };
+
+        await onAddReminder(reminderPayload);
+        updateProposalStatus(msgId, 'confirmed');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save record.';
+      updateProposalStatus(msgId, 'error', msg);
+      throw err;
+    }
+  };
+
+  const handleCancelAction = (msgId: string) => {
+    updateProposalStatus(msgId, 'cancelled');
+  };
+
+  // Conversation Renaming
+  const handleStartRename = (id: string, currentTitle: string) => {
+    setEditingConvId(id);
+    setEditingTitle(currentTitle);
+  };
+
+  const handleSaveRename = (id: string) => {
+    if (editingTitle.trim()) {
+      renameConversation(id, editingTitle.trim());
+    }
+    setEditingConvId(null);
+  };
+
+  const renderConnectionBadge = () => {
+    switch (connectionState) {
+      case 'connected':
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-green)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span className="brand-pulse-dot" />
+            <span>Ollama Ready ({selectedModel || 'Connected'})</span>
+          </div>
+        );
+      case 'checking':
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Probing Ollama on {activeBaseUrl}...</span>
+          </div>
+        );
+      case 'no_models':
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-yellow)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <AlertCircle size={12} />
+            <span>0 Models in Ollama</span>
+          </div>
+        );
+      case 'unavailable':
+      default:
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-red)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span
+              style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--status-red)',
+              }}
+            />
+            <span>Ollama Offline ({activeBaseUrl})</span>
+          </div>
+        );
+    }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 1: Conversation UI Shell"
-        title="Personal Assistant Chat Interface"
-        description="This chat interface demonstrates the desktop companion conversation layout. Real-time LLM inference, memory retrieval, and voice transcription will be wired up during Phase 2."
+        phase="Phase 3: Personal Assistant (Step 3.2)"
+        title="Local AI Assistant with Safe Task & Reminder Actions"
+        description="Kuro connects directly to local Ollama on your machine. Kuro can draft tasks and reminders with structured confirmation previews before writing to your database."
       />
 
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '620px', padding: 0, overflow: 'hidden' }}>
+      {/* Main Container Card */}
+      <div
+        className="card"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '720px',
+          padding: 0,
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
         {/* Chat Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-card-subtle)' }}>
+        <div
+          style={{
+            padding: '12px 18px',
+            borderBottom: '1px solid var(--border-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: 'var(--bg-card-subtle)',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          {/* Left Brand & Connection */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              type="button"
+              className="reminder-action-btn"
+              onClick={() => setShowHistoryPanel((prev) => !prev)}
+              title={showHistoryPanel ? 'Hide conversation history' : 'Show conversation history'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 10px',
+                fontSize: '12px',
+                backgroundColor: showHistoryPanel ? 'var(--bg-card-hover)' : 'transparent',
+              }}
+            >
+              <History size={14} />
+              <span className="hide-mobile">Chats ({conversations.length})</span>
+            </button>
+
             <div className="brand-icon-wrap" style={{ width: '32px', height: '32px' }}>
-              <Bot size={18} />
+              <Bot size={17} />
             </div>
+
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Kuro Assistant Core</div>
-              <div style={{ fontSize: '11px', color: 'var(--status-green)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span className="brand-pulse-dot" /> Local Simulation Ready
+              <div
+                style={{
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span>{activeConversation?.title || 'Kuro Assistant'}</span>
+                <span className="badge badge-primary" style={{ fontSize: '10px' }}>
+                  Local LLM
+                </span>
               </div>
+              {renderConnectionBadge()}
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <span className="badge badge-phase">Local Echo Mode</span>
+          {/* Right Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* New Conversation Button */}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={startNewConversation}
+              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}
+              title="Start a new separate conversation"
+            >
+              <Plus size={13} />
+              <span>New Chat</span>
+            </button>
+
+            {/* Model Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Cpu size={14} style={{ color: 'var(--text-muted)' }} />
+              <select
+                value={selectedModel}
+                onChange={(e) => selectModel(e.target.value)}
+                disabled={models.length === 0 || connectionState !== 'connected'}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '5px 8px',
+                  fontSize: '12px',
+                  outline: 'none',
+                  cursor: models.length > 0 ? 'pointer' : 'not-allowed',
+                  maxWidth: '180px',
+                }}
+                title="Select active Ollama model"
+              >
+                {models.length === 0 ? (
+                  <option value="">No models available</option>
+                ) : (
+                  models.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} {m.size ? `(${formatModelSize(m.size)})` : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* Refresh Connection Button */}
+            <button
+              type="button"
+              className="reminder-action-btn"
+              onClick={refreshConnection}
+              title="Refresh Ollama connection & model list"
+              style={{
+                width: '30px',
+                height: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <RotateCcw
+                size={14}
+                style={{
+                  animation: connectionState === 'checking' ? 'spin 1s linear infinite' : 'none',
+                }}
+              />
+            </button>
           </div>
         </div>
 
-        {/* Messages Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {messages.map((msg) => {
-            const isUser = msg.sender === 'user';
-            return (
+        {/* Offline / Setup Recovery Guidance Banner */}
+        {connectionState !== 'connected' && connectionState !== 'checking' && (
+          <div
+            style={{
+              padding: '12px 18px',
+              backgroundColor: 'var(--bg-card)',
+              borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+            }}
+          >
+            <div
+              style={{
+                padding: '6px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                color: 'var(--status-red)',
+                flexShrink: 0,
+              }}
+            >
+              <AlertCircle size={16} />
+            </div>
+
+            <div style={{ flex: 1, fontSize: '12.5px' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '3px' }}>
+                {connectionState === 'no_models'
+                  ? 'Ollama is running, but no models are installed'
+                  : 'Ollama is offline or unreachable'}
+              </div>
+              <p style={{ color: 'var(--text-secondary)', margin: '0 0 6px 0', lineHeight: 1.4 }}>
+                {connectionError ||
+                  'Kuro communicates with Ollama locally on ' +
+                    activeBaseUrl +
+                    '. Launch Ollama on your system to activate real AI responses.'}
+              </p>
+
               <div
-                key={msg.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  padding: '6px 10px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  fontFamily: 'monospace',
+                  fontSize: '11.5px',
+                  color: 'var(--accent-primary)',
+                  marginBottom: '6px',
+                  overflowX: 'auto',
+                }}
+              >
+                <Terminal size={13} style={{ flexShrink: 0 }} />
+                <span>
+                  {connectionState === 'no_models'
+                    ? 'ollama run qwen2.5:3b'
+                    : 'ollama serve (or set OLLAMA_ORIGINS=http://localhost:5173 && ollama serve)'}
+                </span>
+              </div>
+
+              {connectionGuidance && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-line' }}>
+                  {connectionGuidance}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '12px', flexShrink: 0 }}
+              onClick={refreshConnection}
+            >
+              <RefreshCw size={13} />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
+        {/* Content Body: Split between History Drawer (when open) and Active Chat */}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+          {/* Conversation History Drawer */}
+          {showHistoryPanel && (
+            <div
+              style={{
+                width: '260px',
+                borderRight: '1px solid var(--border-subtle)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <span>Conversations</span>
+                <button
+                  type="button"
+                  className="reminder-action-btn"
+                  onClick={() => setShowHistoryPanel(false)}
+                  title="Close sidebar"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+              </div>
+
+              {/* Conversation List */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {conversations.map((conv) => {
+                  const isActive = conv.id === activeConversationId;
+                  const isEditing = editingConvId === conv.id;
+
+                  return (
+                    <div
+                      key={conv.id}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: isActive ? 'var(--bg-card)' : 'transparent',
+                        border: `1px solid ${isActive ? 'var(--border-subtle)' : 'transparent'}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        gap: '6px',
+                      }}
+                      onClick={() => !isEditing && selectConversation(conv.id)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                        <MessageSquare
+                          size={13}
+                          style={{
+                            color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
+                            flexShrink: 0,
+                          }}
+                        />
+
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename(conv.id);
+                              if (e.key === 'Escape') setEditingConvId(null);
+                            }}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              fontSize: '12px',
+                              padding: '2px 4px',
+                              width: '100%',
+                              backgroundColor: 'var(--bg-input)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--text-primary)',
+                            }}
+                          />
+                        ) : (
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: '12px',
+                                fontWeight: isActive ? 600 : 400,
+                                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {conv.title}
+                            </div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                              {conv.messages.length} messages
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                        {isEditing ? (
+                          <button
+                            type="button"
+                            className="reminder-action-btn"
+                            onClick={() => handleSaveRename(conv.id)}
+                            title="Save title"
+                          >
+                            <Check size={12} style={{ color: 'var(--status-green)' }} />
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="reminder-action-btn"
+                              onClick={() => handleStartRename(conv.id, conv.title)}
+                              title="Rename conversation"
+                            >
+                              <Edit2 size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              className="reminder-action-btn"
+                              onClick={() => setConvToDelete(conv.id)}
+                              title="Delete conversation"
+                              style={{ color: 'var(--status-red)' }}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* History Footer */}
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderTop: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowClearConfirm(true)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    width: '100%',
+                    justifyContent: 'center',
+                    color: 'var(--status-red)',
+                  }}
+                  title="Clear all conversation threads"
+                >
+                  <Trash2 size={12} />
+                  <span>Clear All History</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Active Chat Messages Stream */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+          >
+            {messages.map((msg) => {
+              const isUser = msg.sender === 'user';
+              const isError = msg.status === 'error';
+
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    alignSelf: isUser ? 'flex-end' : 'flex-start',
+                    maxWidth: '82%',
+                  }}
+                >
+                  {!isUser && (
+                    <div
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '50%',
+                        background: isError ? 'rgba(239, 68, 68, 0.15)' : 'var(--accent-bg-subtle)',
+                        border: `1px solid ${isError ? 'var(--status-red)' : 'var(--accent-border)'}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: isError ? 'var(--status-red)' : 'var(--accent-primary)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isError ? <AlertCircle size={16} /> : <Bot size={16} />}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '100%' }}>
+                    <div
+                      style={{
+                        padding: '12px 16px',
+                        borderRadius: 'var(--radius-lg)',
+                        backgroundColor: isUser
+                          ? 'var(--accent-primary)'
+                          : isError
+                            ? 'rgba(239, 68, 68, 0.08)'
+                            : 'var(--bg-card-subtle)',
+                        color: isUser ? '#03070d' : 'var(--text-primary)',
+                        fontWeight: isUser ? 500 : 400,
+                        fontSize: '13.5px',
+                        lineHeight: '1.5',
+                        border: isUser
+                          ? 'none'
+                          : `1px solid ${isError ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-subtle)'}`,
+                        borderTopRightRadius: isUser ? '2px' : undefined,
+                        borderTopLeftRadius: !isUser ? '2px' : undefined,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {msg.text}
+
+                      {/* Assistant Action Proposal Card */}
+                      {msg.proposal && (
+                        <ActionProposalCard
+                          proposal={msg.proposal}
+                          onConfirm={(p) => handleConfirmAction(msg.id, p)}
+                          onCancel={() => handleCancelAction(msg.id)}
+                          isAuthUser={isAuthUser}
+                          userEmail={userEmail}
+                          onNavigate={onNavigate ? (p) => onNavigate(p) : undefined}
+                        />
+                      )}
+
+                      {/* Error State Body */}
+                      {isError && msg.errorMsg && (
+                        <div
+                          style={{
+                            marginTop: '8px',
+                            paddingTop: '8px',
+                            borderTop: '1px solid rgba(239, 68, 68, 0.2)',
+                            fontSize: '11.5px',
+                            color: 'var(--status-red)',
+                          }}
+                        >
+                          <strong>Error:</strong> {msg.errorMsg}
+                          {msg.recoveryGuidance && (
+                            <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
+                              {msg.recoveryGuidance}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{
+                              marginTop: '8px',
+                              padding: '4px 10px',
+                              fontSize: '11.5px',
+                              color: 'var(--text-primary)',
+                            }}
+                            onClick={retryLastMessage}
+                          >
+                            <RotateCcw size={12} />
+                            <span>Retry Message</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <span
+                      style={{
+                        fontSize: '10.5px',
+                        color: 'var(--text-muted)',
+                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>{msg.timestamp}</span>
+                      {msg.modelUsed && (
+                        <span
+                          style={{
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: 'var(--bg-card-hover)',
+                            fontSize: '9.5px',
+                          }}
+                        >
+                          {msg.modelUsed}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  {isUser && (
+                    <div
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '50%',
+                        background: 'var(--bg-card-hover)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--text-secondary)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <User size={16} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* In-Flight Inference Bubble */}
+            {isLoading && (
+              <div
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: '10px',
-                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  alignSelf: 'flex-start',
                   maxWidth: '75%',
                 }}
               >
-                {!isUser && (
-                  <div
-                    style={{
-                      width: '30px',
-                      height: '30px',
-                      borderRadius: '50%',
-                      background: 'var(--accent-bg-subtle)',
-                      border: '1px solid var(--accent-border)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--accent-primary)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Bot size={16} />
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                  <div
-                    style={{
-                      padding: '12px 16px',
-                      borderRadius: 'var(--radius-lg)',
-                      backgroundColor: isUser ? 'var(--accent-primary)' : 'var(--bg-card-subtle)',
-                      color: isUser ? '#03070d' : 'var(--text-primary)',
-                      fontWeight: isUser ? 500 : 400,
-                      fontSize: '13.5px',
-                      lineHeight: '1.5',
-                      border: isUser ? 'none' : '1px solid var(--border-subtle)',
-                      borderTopRightRadius: isUser ? '2px' : undefined,
-                      borderTopLeftRadius: !isUser ? '2px' : undefined,
-                    }}
-                  >
-                    {msg.text}
-                  </div>
-                  <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', alignSelf: isUser ? 'flex-end' : 'flex-start' }}>
-                    {msg.timestamp} {msg.isSimulated && '• (Simulated)'}
-                  </span>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'var(--accent-bg-subtle)',
+                    border: '1px solid var(--accent-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--accent-primary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Bot size={16} />
                 </div>
 
-                {isUser && (
-                  <div
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 'var(--radius-lg)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    borderTopLeftRadius: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="brand-pulse-dot" style={{ animationDuration: '0.8s' }} />
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      {selectedModel} is thinking...
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={cancelRequest}
                     style={{
-                      width: '30px',
-                      height: '30px',
-                      borderRadius: '50%',
-                      background: 'var(--bg-card-hover)',
-                      border: '1px solid var(--border-subtle)',
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      color: 'var(--status-red)',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-secondary)',
-                      flexShrink: 0,
+                      gap: '4px',
                     }}
+                    title="Cancel active response"
                   >
-                    <User size={16} />
-                  </div>
-                )}
+                    <Square size={11} />
+                    <span>Cancel</span>
+                  </button>
+                </div>
               </div>
-            );
-          })}
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Quick Command Chips */}
-        <div style={{ padding: '8px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto' }}>
+        <div
+          style={{
+            padding: '8px 18px',
+            borderTop: '1px solid var(--border-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            overflowX: 'auto',
+          }}
+        >
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            Quick prompts:
+            Action Prompts:
           </span>
           {[
-            'What is my focus progress today?',
-            'Schedule a 25-minute Pomodoro',
-            'How is the robot pet feeling right now?',
-            'List pending tasks for hardware',
+            'Schedule a task for tomorrow at 3 PM: ESP32 Pinout Review',
+            'Set a reminder to drink water in 1 hour',
+            'What is my focus plan for today?',
+            'Tips for staying productive during deep work',
           ].map((prompt) => (
             <button
               key={prompt}
@@ -200,7 +922,7 @@ export const AssistantPage: React.FC = () => {
         <form
           onSubmit={handleSendMessage}
           style={{
-            padding: '12px 20px',
+            padding: '12px 18px',
             borderTop: '1px solid var(--border-subtle)',
             display: 'flex',
             alignItems: 'center',
@@ -210,9 +932,14 @@ export const AssistantPage: React.FC = () => {
         >
           <input
             type="text"
-            placeholder="Type a message or command to test UI interaction..."
+            placeholder={
+              connectionState === 'connected'
+                ? `Ask ${selectedModel || 'Kuro'} anything or ask to create a task/reminder...`
+                : 'Ollama is offline. Start Ollama to chat...'
+            }
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -227,22 +954,147 @@ export const AssistantPage: React.FC = () => {
           <button
             type="button"
             className="header-theme-toggle"
-            title="Voice Input (Planned for Phase 2)"
+            title="Voice Input (Planned for Phase 4)"
             style={{ cursor: 'not-allowed', opacity: 0.6 }}
           >
             <Mic size={18} />
           </button>
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ padding: '10px 16px' }}
-            disabled={!inputValue.trim()}
-          >
-            <Send size={15} />
-            <span>Send</span>
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '10px 16px', color: 'var(--status-red)' }}
+              onClick={cancelRequest}
+              title="Stop generating"
+            >
+              <Square size={14} />
+              <span>Stop</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ padding: '10px 16px' }}
+              disabled={!inputValue.trim()}
+              title="Send message"
+            >
+              <Send size={15} />
+              <span>Send</span>
+            </button>
+          )}
         </form>
+
+        {/* Delete Conversation Confirmation Modal */}
+        {convToDelete && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 50,
+              padding: '20px',
+            }}
+          >
+            <div
+              className="card"
+              style={{
+                maxWidth: '380px',
+                width: '100%',
+                padding: '20px',
+                boxShadow: 'var(--shadow-lg)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--status-red)', marginBottom: '8px' }}>
+                <Trash2 size={18} />
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>Delete Conversation?</h4>
+              </div>
+              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+                Are you sure you want to delete this conversation thread? This action cannot be undone.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConvToDelete(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ backgroundColor: 'var(--status-red)', borderColor: 'var(--status-red)', color: '#fff' }}
+                  onClick={() => {
+                    deleteConversation(convToDelete);
+                    setConvToDelete(null);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Clear All Confirmation Modal */}
+        {showClearConfirm && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 50,
+              padding: '20px',
+            }}
+          >
+            <div
+              className="card"
+              style={{
+                maxWidth: '400px',
+                width: '100%',
+                padding: '20px',
+                boxShadow: 'var(--shadow-lg)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--status-red)', marginBottom: '8px' }}>
+                <AlertCircle size={18} />
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>Clear All Conversations?</h4>
+              </div>
+              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+                This will clear all local chat history for this account and start a fresh conversation. Your tasks, reminders, and database records will NOT be deleted.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowClearConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ backgroundColor: 'var(--status-red)', borderColor: 'var(--status-red)', color: '#fff' }}
+                  onClick={() => {
+                    clearAllConversations();
+                    setShowClearConfirm(false);
+                    setShowHistoryPanel(false);
+                  }}
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

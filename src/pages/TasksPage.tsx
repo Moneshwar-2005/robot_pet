@@ -1,18 +1,38 @@
 import React, { useState } from 'react';
 import type { Task, TaskCategory, TaskPriority } from '../types';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
-import { CheckSquare, Plus, Check, FolderKanban, Tag, Clock } from 'lucide-react';
+import { formatTaskDeadline, formatLocalDateString } from '../lib/formatters';
+import {
+  CheckSquare,
+  Plus,
+  Check,
+  FolderKanban,
+  Tag,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  Loader2,
+  Trash2,
+} from 'lucide-react';
 
 interface TasksPageProps {
   tasks: Task[];
+  loading?: boolean;
+  error?: string | null;
   onToggleTask: (taskId: string) => void;
   onAddTask: (newTask: Omit<Task, 'id'>) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onRetry?: () => void;
 }
 
 export const TasksPage: React.FC<TasksPageProps> = ({
   tasks,
+  loading = false,
+  error = null,
   onToggleTask,
   onAddTask,
+  onDeleteTask,
+  onRetry,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
@@ -20,6 +40,8 @@ export const TasksPage: React.FC<TasksPageProps> = ({
   const [newCategory, setNewCategory] = useState<TaskCategory>('robot');
   const [newPriority, setNewPriority] = useState<TaskPriority>('medium');
   const [newEstimate, setNewEstimate] = useState(30);
+  const [newDueDate, setNewDueDate] = useState(() => formatLocalDateString());
+  const [newDueTime, setNewDueTime] = useState('18:00');
 
   const filteredTasks = tasks.filter((t) => {
     if (selectedCategory === 'all') return true;
@@ -34,8 +56,8 @@ export const TasksPage: React.FC<TasksPageProps> = ({
       title: newTitle.trim(),
       category: newCategory,
       priority: newPriority,
-      dueDate: 'Today',
-      dueTime: '6:00 PM',
+      dueDate: newDueDate || null,
+      dueTime: newDueTime ? `${newDueTime}:00` : null,
       estimatedMinutes: newEstimate,
       completed: false,
       tags: [newCategory === 'robot' ? 'Hardware' : 'Work'],
@@ -59,14 +81,48 @@ export const TasksPage: React.FC<TasksPageProps> = ({
   };
 
   const completedCount = tasks.filter((t) => t.completed).length;
+  const completionPercentage =
+    tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 1: Local Task Engine"
-        title="Tasks & Projects Management"
-        description="All task state changes in this view operate locally in memory. Multi-device sync, database backup, and automated voice scheduling will be added in Phase 2."
+        phase="Phase 2: Persistent Tasks"
+        title="Tasks &amp; Projects Management"
+        description="All task state changes are synchronized with your Supabase database when signed in, or saved in local demo mode when signed out."
       />
+
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            padding: '12px 16px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-red)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={18} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+            <span style={{ fontSize: '13px' }}>{error}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onRetry}
+              style={{ padding: '4px 10px', fontSize: '12px' }}
+            >
+              <RefreshCw size={12} />
+              <span>Retry</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Top Action Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -104,12 +160,12 @@ export const TasksPage: React.FC<TasksPageProps> = ({
         <div className="metric-stat-box">
           <span className="metric-label">Completed</span>
           <span className="metric-value">{completedCount}</span>
-          <span className="metric-sub">{Math.round((completedCount / tasks.length) * 100)}% completion</span>
+          <span className="metric-sub">{completionPercentage}% completion</span>
         </div>
         <div className="metric-stat-box">
           <span className="metric-label">Robot Milestone</span>
-          <span className="metric-value">Phase 1</span>
-          <span className="metric-sub">UI Shell active</span>
+          <span className="metric-value">Phase 2</span>
+          <span className="metric-sub">Cloud persistence</span>
         </div>
         <div className="metric-stat-box">
           <span className="metric-label">Estimated Work</span>
@@ -124,7 +180,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
       {showModal && (
         <div className="card" style={{ border: '1px solid var(--accent-border)', backgroundColor: 'var(--bg-card-hover)' }}>
           <div className="card-header">
-            <h3 className="card-title">Create New Task (Local State)</h3>
+            <h3 className="card-title">Create New Task</h3>
             <button
               type="button"
               className="btn btn-secondary"
@@ -149,7 +205,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                 color: 'var(--text-primary)',
               }}
             />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
                   Category
@@ -195,6 +251,30 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                   style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)' }}
                 />
               </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Due Date
+                </label>
+                <input
+                  type="date"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Due Time
+                </label>
+                <input
+                  type="time"
+                  value={newDueTime}
+                  onChange={(e) => setNewDueTime(e.target.value)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}
+                />
+              </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
@@ -230,7 +310,13 @@ export const TasksPage: React.FC<TasksPageProps> = ({
         </div>
 
         <div>
-          {filteredTasks.length === 0 ? (
+          {loading ? (
+            <div className="empty-state">
+              <Loader2 className="empty-state-icon" style={{ animation: 'spin 1s linear infinite' }} />
+              <div className="empty-state-title">Loading tasks...</div>
+              <p className="empty-state-desc">Fetching tasks from your database.</p>
+            </div>
+          ) : filteredTasks.length === 0 ? (
             <div className="empty-state">
               <CheckSquare className="empty-state-icon" />
               <div className="empty-state-title">No tasks in this category</div>
@@ -248,7 +334,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                   {task.completed && <Check size={13} strokeWidth={3} />}
                 </button>
 
-                <div className="task-body">
+                <div className="task-body" style={{ flex: 1 }}>
                   <span className="task-title">{task.title}</span>
                   {task.description && (
                     <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
@@ -263,7 +349,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                       <Clock size={11} /> ~{task.estimatedMinutes}m
                     </span>
                     <span>•</span>
-                    <span>Due {task.dueDate} at {task.dueTime}</span>
+                    <span>{formatTaskDeadline(task.dueDate, task.dueTime)}</span>
                     {task.tags.map((tag) => (
                       <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                         <Tag size={10} /> {tag}
@@ -271,6 +357,18 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                     ))}
                   </div>
                 </div>
+
+                {onDeleteTask && (
+                  <button
+                    type="button"
+                    className="reminder-action-btn"
+                    onClick={() => onDeleteTask(task.id)}
+                    title="Delete task"
+                    style={{ color: 'var(--status-red)', alignSelf: 'center', marginLeft: '8px' }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             ))
           )}
