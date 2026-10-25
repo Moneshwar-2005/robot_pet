@@ -80,12 +80,84 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
     }
   };
 
+  const renderSyncBadge = (syncStatus?: Reminder['syncStatus']) => {
+    if (!syncStatus || syncStatus === 'local-only') {
+      return (
+        <span
+          className="badge"
+          style={{
+            fontSize: '10px',
+            padding: '1px 6px',
+            backgroundColor: 'var(--bg-card-subtle)',
+            color: 'var(--text-muted)',
+            border: '1px solid var(--border-subtle)',
+          }}
+          title="Saved locally on this device (Local Companion Mode)"
+        >
+          Device Only
+        </span>
+      );
+    }
+    if (syncStatus === 'pending-sync') {
+      return (
+        <span
+          className="badge"
+          style={{
+            fontSize: '10px',
+            padding: '1px 6px',
+            backgroundColor: 'rgba(234, 179, 8, 0.15)',
+            color: 'var(--status-yellow)',
+            border: '1px solid rgba(234, 179, 8, 0.35)',
+          }}
+          title="Saved locally on this device. Waiting to synchronize with Supabase."
+        >
+          Waiting to sync
+        </span>
+      );
+    }
+    if (syncStatus === 'synced') {
+      return (
+        <span
+          className="badge"
+          style={{
+            fontSize: '10px',
+            padding: '1px 6px',
+            backgroundColor: 'rgba(34, 197, 94, 0.12)',
+            color: 'var(--status-green)',
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+          }}
+          title="Synchronized and persisted in Supabase database."
+        >
+          Synced
+        </span>
+      );
+    }
+    if (syncStatus === 'sync-error') {
+      return (
+        <span
+          className="badge"
+          style={{
+            fontSize: '10px',
+            padding: '1px 6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+            color: 'var(--status-red)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+          }}
+          title="Synchronization error. Will retry when connection is restored."
+        >
+          Sync Error
+        </span>
+      );
+    }
+    return null;
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 2: Persistent Reminders"
+        phase="Phase 3: Offline Data &amp; Sync"
         title="Reminders &amp; Routine Calendar"
-        description="Schedule reminders and wellness check-ins. Authenticated records are stored in Supabase; local demo mode is active when signed out."
+        description="Schedule reminders and wellness check-ins. Saved locally first for offline reliability, and synchronized automatically with Supabase when online."
       />
 
       {error && (
@@ -292,11 +364,14 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
                         <div className="reminder-title" style={{ textDecoration: r.done ? 'line-through' : undefined }}>
                           {r.title}
                         </div>
-                        <div className="reminder-time">
-                          {formatReminderDisplay(r.time)} • <span style={{ textTransform: 'capitalize' }}>{r.type.replace('-', ' ')}</span>
+                        <div className="reminder-time" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span>{formatReminderDisplay(r.time)}</span>
+                          <span>•</span>
+                          <span style={{ textTransform: 'capitalize' }}>{r.type.replace('-', ' ')}</span>
                           {r.priority === 'important' && (
-                            <span style={{ color: 'var(--status-amber)', marginLeft: '6px', fontWeight: 600 }}>• Important</span>
+                            <span style={{ color: 'var(--status-amber)', fontWeight: 600 }}>• Important</span>
                           )}
+                          {renderSyncBadge(r.syncStatus)}
                         </div>
                       </div>
                     </div>

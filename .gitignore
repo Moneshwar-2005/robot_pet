@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Kuro Desktop Companion
+companion/.session_token
+companion/*.token
+companion/.sessions_history.json*

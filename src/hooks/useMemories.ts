@@ -4,6 +4,7 @@ import { memoryRowToClient, memoryToInsertPayload } from '../lib/adapters';
 import { sampleMemoryItems } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
+import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
 
 export const initialMemories: ClientMemory[] = sampleMemoryItems.map((m, idx) => ({
   id: m.id,
@@ -43,10 +44,22 @@ export function useMemories(): UseMemoriesReturn {
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
   const fetchMemories = useCallback(async (userId: string) => {
-    if (!supabase) return;
     const currentSeq = ++sequenceRef.current;
-    setLoading(true);
     setError(null);
+
+    // 1. Instant offline load from local IndexedDB cache
+    try {
+      const cached = await getOfflineCacheItem<ClientMemory[]>(userId, 'memories');
+      if (cached && currentSeq === sequenceRef.current) {
+        setDbMemories(cached);
+        setDbUserId(userId);
+        setLoading(false);
+      }
+    } catch {
+      // Fallback gracefully
+    }
+
+    if (!supabase) return;
 
     try {
       const { data, error: fetchErr } = await supabase
@@ -58,16 +71,16 @@ export function useMemories(): UseMemoriesReturn {
       if (currentSeq !== sequenceRef.current) return;
 
       if (fetchErr) {
-        setError('Failed to load companion memories.');
-        setDbMemories([]);
+        setError('Offline or server unreachable. Showing cached memories.');
       } else {
-        setDbMemories((data || []).map(memoryRowToClient));
+        const clientMemories = (data || []).map(memoryRowToClient);
+        setDbMemories(clientMemories);
+        setDbUserId(userId);
+        void setOfflineCacheItem(userId, 'memories', clientMemories);
       }
-      setDbUserId(userId);
     } catch {
       if (currentSeq !== sequenceRef.current) return;
-      setError('An unexpected network error occurred while loading memories.');
-      setDbMemories([]);
+      setError('Network offline. Showing cached memories.');
       setDbUserId(userId);
     } finally {
       if (currentSeq === sequenceRef.current) {
@@ -132,15 +145,19 @@ export function useMemories(): UseMemoriesReturn {
           .single();
 
         if (insertErr || !created) {
-          setError(insertErr?.message || 'Failed to save memory.');
+          setError(insertErr?.message || 'Failed to save memory to server.');
           return false;
         }
 
         const clientMem = memoryRowToClient(created);
-        setDbMemories((prev) => [clientMem, ...prev]);
+        setDbMemories((prev) => {
+          const next = [clientMem, ...prev];
+          void setOfflineCacheItem(user.id, 'memories', next);
+          return next;
+        });
         return true;
       } catch {
-        setError('Network error while saving memory.');
+        setError('Network offline. Memory could not be saved to server.');
         return false;
       }
     },
@@ -177,19 +194,19 @@ export function useMemories(): UseMemoriesReturn {
       const target = dbMemories.find((m) => m.id === id);
       if (!target) return false;
 
-      setDbMemories((prev) =>
-        prev.map((m) =>
-          m.id === id
-            ? {
-                ...m,
-                ...(updates.category !== undefined ? { category: updates.category.trim() } : {}),
-                ...(updates.fact !== undefined ? { fact: updates.fact.trim() } : {}),
-                ...(updates.confidence !== undefined ? { confidence: updates.confidence } : {}),
-                updatedAt: new Date().toISOString(),
-              }
-            : m
-        )
+      const nextMemories = dbMemories.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              ...(updates.category !== undefined ? { category: updates.category.trim() } : {}),
+              ...(updates.fact !== undefined ? { fact: updates.fact.trim() } : {}),
+              ...(updates.confidence !== undefined ? { confidence: updates.confidence } : {}),
+              updatedAt: new Date().toISOString(),
+            }
+          : m
       );
+      setDbMemories(nextMemories);
+      void setOfflineCacheItem(user.id, 'memories', nextMemories);
 
       try {
         const payload: { category?: string; fact?: string; confidence?: number } = {};
@@ -205,14 +222,16 @@ export function useMemories(): UseMemoriesReturn {
 
         if (updateErr) {
           setDbMemories(previousMemories);
-          setError(updateErr.message || 'Failed to update memory.');
+          void setOfflineCacheItem(user.id, 'memories', previousMemories);
+          setError(updateErr.message || 'Failed to update memory on server.');
           return false;
         }
 
         return true;
       } catch {
         setDbMemories(previousMemories);
-        setError('Network error while updating memory.');
+        void setOfflineCacheItem(user.id, 'memories', previousMemories);
+        setError('Network offline. Memory update could not be saved to server.');
         return false;
       }
     },
@@ -232,7 +251,9 @@ export function useMemories(): UseMemoriesReturn {
       // Optimistic delete with targeted rollback
       const target = dbMemories.find((m) => m.id === id);
       if (!target) return false;
-      setDbMemories((prev) => prev.filter((m) => m.id !== id));
+      const nextMemories = dbMemories.filter((m) => m.id !== id);
+      setDbMemories(nextMemories);
+      void setOfflineCacheItem(user.id, 'memories', nextMemories);
 
       try {
         const { error: deleteErr } = await supabase
@@ -243,14 +264,16 @@ export function useMemories(): UseMemoriesReturn {
 
         if (deleteErr) {
           setDbMemories((prev) => (prev.some((m) => m.id === id) ? prev : [target, ...prev]));
-          setError(deleteErr.message || 'Failed to delete memory.');
+          void setOfflineCacheItem(user.id, 'memories', dbMemories);
+          setError(deleteErr.message || 'Failed to delete memory from server.');
           return false;
         }
 
         return true;
       } catch {
         setDbMemories((prev) => (prev.some((m) => m.id === id) ? prev : [target, ...prev]));
-        setError('Network error while deleting memory.');
+        void setOfflineCacheItem(user.id, 'memories', dbMemories);
+        setError('Network offline. Memory deletion could not be saved to server.');
         return false;
       }
     },

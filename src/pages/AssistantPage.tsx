@@ -20,12 +20,15 @@ import {
   Check,
   Edit2,
   ChevronLeft,
+  Layers,
 } from 'lucide-react';
-import { useOllamaChat } from '../hooks/useOllamaChat';
+import { useAssistantChat } from '../hooks/useAssistantChat';
 import { useAuth } from '../context/useAuth';
 import { ActionProposalCard } from '../components/assistant/ActionProposalCard';
+import { WebLLMSetupPanel } from '../components/assistant/WebLLMSetupPanel';
 import type { Task, Reminder, PageId } from '../types';
 import type { ActionProposal, TaskProposalPayload, ReminderProposalPayload } from '../lib/assistantActions';
+import type { AIProviderId } from '../lib/ai';
 
 interface AssistantPageProps {
   onAddTask?: (newTaskData: Omit<Task, 'id'>) => Promise<void>;
@@ -43,6 +46,10 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   const userEmail = user?.email || null;
 
   const {
+    providers,
+    activeProvider,
+    activeProviderId,
+    selectProvider,
     connectionState,
     models,
     selectedModel,
@@ -65,7 +72,19 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     retryLastMessage,
     cancelRequest,
     activeBaseUrl,
-  } = useOllamaChat();
+    isModelLoaded,
+    isInitializing,
+    initProgress,
+    lifecycleState,
+    isModelCached,
+    storageEstimate,
+    initializeOnDeviceModel,
+    cancelOnDeviceInit,
+    deleteOnDeviceCachedModel,
+    unloadOnDeviceModel,
+    benchmarkTimingMs,
+  } = useAssistantChat();
+
 
   const [inputValue, setInputValue] = useState('');
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
@@ -173,6 +192,110 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   };
 
   const renderConnectionBadge = () => {
+    if (activeProviderId === 'on_device_mobile') {
+      if (isModelLoaded || lifecycleState === 'ready') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-green)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span className="brand-pulse-dot" />
+            <span>WebLLM Ready ({selectedModel || 'On-Device'})</span>
+            {benchmarkTimingMs !== null && benchmarkTimingMs !== undefined && (
+              <span style={{ color: 'var(--text-muted)' }}>
+                • ~{(benchmarkTimingMs / 1000).toFixed(1)}s
+              </span>
+            )}
+          </div>
+        );
+      }
+      if (lifecycleState === 'cancelling') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-amber)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Cancelling...</span>
+          </div>
+        );
+      }
+      if (isInitializing || lifecycleState === 'downloading_initializing') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-amber)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>
+              Initializing On-Device AI... ({Math.round((initProgress?.progress || 0) * 100)}%)
+            </span>
+          </div>
+        );
+      }
+      if (connectionState === 'unsupported' || lifecycleState === 'unsupported') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-red)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <AlertCircle size={12} />
+            <span>WebGPU Unsupported</span>
+          </div>
+        );
+      }
+      if (lifecycleState === 'failed') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-red)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <AlertCircle size={12} />
+            <span>Initialization Failed</span>
+          </div>
+        );
+      }
+      return (
+        <div
+          style={{
+            fontSize: '11px',
+            color: 'var(--status-yellow)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <AlertCircle size={12} />
+          <span>{isModelCached ? 'On-Device AI (Cached)' : 'On-Device AI (Setup Required)'}</span>
+        </div>
+      );
+    }
+
     switch (connectionState) {
       case 'connected':
         return (
@@ -186,7 +309,9 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             }}
           >
             <span className="brand-pulse-dot" />
-            <span>Ollama Ready ({selectedModel || 'Connected'})</span>
+            <span>
+              {activeProvider.name} Ready ({selectedModel || 'Connected'})
+            </span>
           </div>
         );
       case 'checking':
@@ -201,7 +326,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             }}
           >
             <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
-            <span>Probing Ollama on {activeBaseUrl}...</span>
+            <span>Probing {activeProvider.name}...</span>
           </div>
         );
       case 'no_models':
@@ -216,11 +341,27 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             }}
           >
             <AlertCircle size={12} />
-            <span>0 Models in Ollama</span>
+            <span>0 Models in {activeProvider.name}</span>
+          </div>
+        );
+      case 'unsupported':
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <AlertCircle size={12} />
+            <span>{activeProvider.name} (Planned Provider)</span>
           </div>
         );
       case 'unavailable':
       default:
+
         return (
           <div
             style={{
@@ -239,7 +380,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
                 backgroundColor: 'var(--status-red)',
               }}
             />
-            <span>Ollama Offline ({activeBaseUrl})</span>
+            <span>{activeProvider.name} Offline</span>
           </div>
         );
     }
@@ -248,9 +389,9 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 3: Personal Assistant (Step 3.2)"
-        title="Local AI Assistant with Safe Task & Reminder Actions"
-        description="Kuro connects directly to local Ollama on your machine. Kuro can draft tasks and reminders with structured confirmation previews before writing to your database."
+        phase="Phase 3: Personal Assistant (Step 3.4)"
+        title="Provider-Independent AI Architecture"
+        description="Kuro's assistant logic is provider-independent. Currently powered by Local Ollama (PC) with streaming responses and safe action confirmations. Architectural foundation ready for future on-device mobile AI."
       />
 
       {/* Main Container Card */}
@@ -336,13 +477,12 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
               <span>New Chat</span>
             </button>
 
-            {/* Model Selector */}
+            {/* AI Provider Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Cpu size={14} style={{ color: 'var(--text-muted)' }} />
+              <Layers size={14} style={{ color: 'var(--text-muted)' }} />
               <select
-                value={selectedModel}
-                onChange={(e) => selectModel(e.target.value)}
-                disabled={models.length === 0 || connectionState !== 'connected'}
+                value={activeProviderId}
+                onChange={(e) => selectProvider(e.target.value as AIProviderId)}
                 style={{
                   backgroundColor: 'var(--bg-card)',
                   color: 'var(--text-primary)',
@@ -351,29 +491,59 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
                   padding: '5px 8px',
                   fontSize: '12px',
                   outline: 'none',
-                  cursor: models.length > 0 ? 'pointer' : 'not-allowed',
-                  maxWidth: '180px',
+                  cursor: 'pointer',
+                  maxWidth: '170px',
                 }}
-                title="Select active Ollama model"
+                title="Select active AI runtime provider"
               >
-                {models.length === 0 ? (
-                  <option value="">No models available</option>
-                ) : (
-                  models.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.name} {m.size ? `(${formatModelSize(m.size)})` : ''}
-                    </option>
-                  ))
-                )}
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id} disabled={!p.isImplemented}>
+                    {p.name} {!p.isImplemented ? '(Planned)' : ''}
+                  </option>
+                ))}
               </select>
             </div>
+
+            {/* Model Selector (when supported) */}
+            {activeProvider.capabilities.modelDiscovery && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Cpu size={14} style={{ color: 'var(--text-muted)' }} />
+                <select
+                  value={selectedModel}
+                  onChange={(e) => selectModel(e.target.value)}
+                  disabled={models.length === 0 || connectionState !== 'connected'}
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '5px 8px',
+                    fontSize: '12px',
+                    outline: 'none',
+                    cursor: models.length > 0 ? 'pointer' : 'not-allowed',
+                    maxWidth: '170px',
+                  }}
+                  title={`Select active model for ${activeProvider.name}`}
+                >
+                  {models.length === 0 ? (
+                    <option value="">No models available</option>
+                  ) : (
+                    models.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name} {m.size ? `(${formatModelSize(m.size)})` : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            )}
 
             {/* Refresh Connection Button */}
             <button
               type="button"
               className="reminder-action-btn"
               onClick={refreshConnection}
-              title="Refresh Ollama connection & model list"
+              title={`Refresh ${activeProvider.name} connection & model list`}
               style={{
                 width: '30px',
                 height: '30px',
@@ -392,8 +562,32 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
           </div>
         </div>
 
-        {/* Offline / Setup Recovery Guidance Banner */}
-        {connectionState !== 'connected' && connectionState !== 'checking' && (
+        {/* On-Device Mobile AI (WebLLM) Setup & Status Card */}
+        {activeProviderId === 'on_device_mobile' && (
+          <WebLLMSetupPanel
+            models={models}
+            selectedModel={selectedModel}
+            onSelectModel={selectModel}
+            isModelLoaded={isModelLoaded}
+            isInitializing={isInitializing}
+            initProgress={initProgress}
+            connectionState={connectionState}
+            connectionError={connectionError}
+            lifecycleState={lifecycleState}
+            isModelCached={isModelCached}
+            storageEstimate={storageEstimate}
+            onInitialize={initializeOnDeviceModel}
+            onCancel={cancelOnDeviceInit}
+            onRetry={refreshConnection}
+            onDeleteCachedModel={deleteOnDeviceCachedModel}
+            onUnloadModel={unloadOnDeviceModel}
+            benchmarkTimingMs={benchmarkTimingMs}
+            onSwitchToOllama={() => selectProvider('ollama')}
+          />
+        )}
+
+        {/* Offline / Setup Recovery Guidance Banner for Ollama */}
+        {activeProviderId === 'ollama' && connectionState !== 'connected' && connectionState !== 'checking' && (
           <div
             style={{
               padding: '12px 18px',
@@ -717,7 +911,55 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
                         wordBreak: 'break-word',
                       }}
                     >
-                      {msg.text}
+                      {msg.status === 'sending' && !msg.text ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="brand-pulse-dot" style={{ animationDuration: '0.8s' }} />
+                          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            {msg.modelUsed || selectedModel || 'Kuro'} is thinking...
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          {msg.text}
+                          {msg.status === 'sending' && (
+                            <span
+                              className="brand-pulse-dot"
+                              style={{
+                                display: 'inline-block',
+                                width: '6px',
+                                height: '6px',
+                                marginLeft: '5px',
+                                verticalAlign: 'baseline',
+                                animationDuration: '0.6s',
+                              }}
+                              title="Streaming response..."
+                            />
+                          )}
+                        </>
+                      )}
+
+                      {/* Streaming in-bubble stop button */}
+                      {msg.status === 'sending' && (
+                        <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={cancelRequest}
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '11px',
+                              color: 'var(--status-red)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title="Stop generating"
+                          >
+                            <Square size={10} />
+                            <span>Stop</span>
+                          </button>
+                        </div>
+                      )}
 
                       {/* Assistant Action Proposal Card */}
                       {msg.proposal && (
@@ -814,8 +1056,8 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
               );
             })}
 
-            {/* In-Flight Inference Bubble */}
-            {isLoading && (
+            {/* In-Flight Inference Bubble Fallback */}
+            {isLoading && !messages.some((m) => m.status === 'sending') && (
               <div
                 style={{
                   display: 'flex',
@@ -933,13 +1175,30 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
           <input
             type="text"
             placeholder={
-              connectionState === 'connected'
+              activeProviderId === 'on_device_mobile'
+                ? isModelLoaded || lifecycleState === 'ready'
+                  ? `Ask ${selectedModel || 'Kuro'} anything (on-device local AI)...`
+                  : lifecycleState === 'cancelling'
+                  ? 'Cancelling model initialization...'
+                  : lifecycleState === 'cancelled'
+                  ? 'Initialization cancelled. Click Retry above to resume...'
+                  : lifecycleState === 'failed'
+                  ? 'Initialization failed. Review error above and retry...'
+                  : isInitializing || lifecycleState === 'downloading_initializing'
+                  ? 'Model is downloading & initializing (see progress above)...'
+                  : connectionState === 'unsupported' || lifecycleState === 'unsupported'
+                  ? 'WebGPU unavailable on this device/browser.'
+                  : isModelCached
+                  ? 'Model cached in browser. Click "Load Cached Model" above...'
+                  : 'Download & initialize model above to start chatting...'
+                : connectionState === 'connected'
                 ? `Ask ${selectedModel || 'Kuro'} anything or ask to create a task/reminder...`
                 : 'Ollama is offline. Start Ollama to chat...'
             }
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            disabled={activeProviderId === 'on_device_mobile' && !isModelLoaded && lifecycleState !== 'ready'}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -948,6 +1207,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
               borderRadius: 'var(--radius-md)',
               color: 'var(--text-primary)',
               fontSize: '13.5px',
+              opacity: activeProviderId === 'on_device_mobile' && !isModelLoaded ? 0.7 : 1,
             }}
           />
 
@@ -976,8 +1236,15 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
               type="submit"
               className="btn btn-primary"
               style={{ padding: '10px 16px' }}
-              disabled={!inputValue.trim()}
-              title="Send message"
+              disabled={
+                !inputValue.trim() ||
+                (activeProviderId === 'on_device_mobile' && !isModelLoaded)
+              }
+              title={
+                activeProviderId === 'on_device_mobile' && !isModelLoaded
+                  ? 'Initialize on-device model first'
+                  : 'Send message'
+              }
             >
               <Send size={15} />
               <span>Send</span>

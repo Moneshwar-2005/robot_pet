@@ -1,7 +1,10 @@
 import React from 'react';
 import type { PageId, Theme, PetStatus, PetMood } from '../../types';
-import { Menu, Moon, Sun, Bot, LogIn, LogOut, User as UserIcon } from 'lucide-react';
+import { Menu, Moon, Sun, Bot, LogIn, LogOut, User as UserIcon, Wifi, WifiOff, Download, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/useAuth';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { usePWAInstall } from '../../hooks/usePWAInstall';
+import { useSyncStatus } from '../../hooks/useSyncStatus';
 
 interface HeaderProps {
   currentPage: PageId;
@@ -26,6 +29,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
 }) => {
   const { user, signOut } = useAuth();
+  const { isOnline, wasOffline } = useNetworkStatus();
+  const { isInstallable, promptInstall } = usePWAInstall();
+  const { isSyncing, pendingCount } = useSyncStatus();
+
   return (
     <header className="app-header">
       <div className="header-left">
@@ -45,6 +52,88 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="header-right">
+        {/* Network Offline / Reconnection Pill */}
+        {!isOnline ? (
+          <div
+            className="header-pet-pill"
+            style={{
+              backgroundColor: 'rgba(234, 179, 8, 0.12)',
+              borderColor: 'rgba(234, 179, 8, 0.4)',
+              color: 'var(--status-yellow)',
+              gap: '6px',
+            }}
+            title="Internet disconnected. Local features and local Ollama assistant remain functional."
+          >
+            <WifiOff size={13} />
+            <span>Offline</span>
+          </div>
+        ) : wasOffline ? (
+          <div
+            className="header-pet-pill"
+            style={{
+              backgroundColor: 'rgba(34, 197, 94, 0.12)',
+              borderColor: 'rgba(34, 197, 94, 0.4)',
+              color: 'var(--status-green)',
+              gap: '6px',
+            }}
+            title="Internet connection restored."
+          >
+            <Wifi size={13} />
+            <span>Back Online</span>
+          </div>
+        ) : null}
+ 
+        {/* Outbox Synchronization Status Pill */}
+        {user && isSyncing ? (
+          <div
+            className="header-pet-pill"
+            style={{
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              borderColor: 'rgba(56, 189, 248, 0.4)',
+              color: 'var(--accent-primary)',
+              gap: '6px',
+            }}
+            title="Synchronizing changes with Supabase..."
+          >
+            <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Syncing</span>
+          </div>
+        ) : user && pendingCount > 0 ? (
+          <div
+            className="header-pet-pill"
+            style={{
+              backgroundColor: 'rgba(234, 179, 8, 0.12)',
+              borderColor: 'rgba(234, 179, 8, 0.4)',
+              color: 'var(--status-yellow)',
+              gap: '6px',
+            }}
+            title={`${pendingCount} operation(s) saved on this device, waiting to synchronize with Supabase`}
+          >
+            <RefreshCw size={12} />
+            <span>{pendingCount} Pending Sync</span>
+          </div>
+        ) : null}
+
+        {/* PWA Install Button */}
+        {isInstallable && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={promptInstall}
+            style={{
+              padding: '4px 10px',
+              fontSize: '11.5px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+            }}
+            title="Install Kuro as a desktop or mobile application"
+          >
+            <Download size={13} />
+            <span>Install App</span>
+          </button>
+        )}
+
         {/* Quick Pet Companion Status Badge */}
         <div className="header-pet-pill">
           <Bot size={15} style={{ color: 'var(--accent-primary)' }} />

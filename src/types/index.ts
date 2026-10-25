@@ -1,3 +1,6 @@
+import type { SyncStatus } from './sync';
+export type { SyncStatus } from './sync';
+
 export type PageId =
   | 'dashboard'
   | 'pet-studio'
@@ -28,7 +31,6 @@ export interface PetStatus {
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskCategory = 'work' | 'personal' | 'robot' | 'learning';
-
 export interface Task {
   id: string;
   title: string;
@@ -40,6 +42,7 @@ export interface Task {
   completed: boolean;
   tags: string[];
   description?: string;
+  syncStatus?: SyncStatus;
 }
 
 export interface Reminder {
@@ -49,6 +52,7 @@ export interface Reminder {
   type: 'wellness' | 'task' | 'meeting' | 'pet-routine';
   priority: 'normal' | 'important';
   done: boolean;
+  syncStatus?: SyncStatus;
 }
 
 export interface WorkSummary {

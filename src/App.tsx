@@ -208,7 +208,7 @@ function AppContent() {
           />
         );
       case 'daily-reports':
-        return <DailyReportsPage />;
+        return <DailyReportsPage sessions={sessions} tasks={tasks} />;
       case 'ai-memory':
         return (
           <MemoryPage

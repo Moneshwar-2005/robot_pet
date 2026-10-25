@@ -4,6 +4,13 @@ import { initialReminders } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
 import { reminderRowToReminder, reminderToInsertPayload } from '../lib/adapters';
+import {
+  setOfflineCacheItem,
+  getOfflineCacheItem,
+  enqueueOutboxOperation,
+  getOutboxOperationsForScope,
+} from '../lib/offlineDb';
+import { processOutbox, subscribeEntitySync } from '../lib/syncEngine';
 
 export interface UseRemindersReturn {
   reminders: Reminder[];
@@ -18,7 +25,9 @@ export interface UseRemindersReturn {
 
 export function useReminders(): UseRemindersReturn {
   const { user } = useAuth();
-  const [demoReminders, setDemoReminders] = useState<Reminder[]>(initialReminders);
+  const [demoReminders, setDemoReminders] = useState<Reminder[]>(() =>
+    initialReminders.map((r) => ({ ...r, syncStatus: 'local-only' }))
+  );
   const [dbReminders, setDbReminders] = useState<Reminder[]>([]);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(user));
@@ -32,40 +41,120 @@ export function useReminders(): UseRemindersReturn {
   }, [user, dbUserId, dbReminders, demoReminders]);
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
+  // Reconcile server reminders with pending local outbox operations
+  const reconcileReminders = useCallback(
+    async (userId: string, serverReminders: Reminder[]): Promise<Reminder[]> => {
+      const ops = await getOutboxOperationsForScope(userId);
+      const reminderOps = ops.filter((o) => o.entityType === 'reminder');
+
+      // 1. Filter out tombstones (pending deletes)
+      const pendingDeletedIds = new Set(
+        reminderOps.filter((o) => o.action === 'delete').map((o) => o.entityId)
+      );
+      let reconciled = serverReminders.filter((r) => !pendingDeletedIds.has(r.id));
+
+      // 2. Mark pending updates
+      const pendingUpdates = new Map(
+        reminderOps.filter((o) => o.action === 'update').map((o) => [o.entityId, o])
+      );
+      reconciled = reconciled.map((r) => {
+        const updateOp = pendingUpdates.get(r.id);
+        if (updateOp && updateOp.payload) {
+          const payload = updateOp.payload as Partial<Reminder>;
+          return {
+            ...r,
+            ...payload,
+            syncStatus: updateOp.status === 'failed' ? 'sync-error' : 'pending-sync',
+          };
+        }
+        return { ...r, syncStatus: 'synced' };
+      });
+
+      // 3. Append pending creates that do not yet exist on the server
+      const serverIds = new Set(reconciled.map((r) => r.id));
+      const pendingCreates = reminderOps.filter(
+        (o) => o.action === 'create' && !serverIds.has(o.entityId)
+      );
+
+      for (const op of pendingCreates) {
+        if (op.payload) {
+          const payload = op.payload as {
+            id: string;
+            title: string;
+            remind_at: string;
+            reminder_type?: Reminder['type'];
+            priority?: Reminder['priority'];
+            done?: boolean;
+          };
+          reconciled.push({
+            id: payload.id || op.entityId,
+            title: payload.title,
+            time: payload.remind_at,
+            type: payload.reminder_type || 'wellness',
+            priority: payload.priority || 'normal',
+            done: payload.done || false,
+            syncStatus: op.status === 'failed' ? 'sync-error' : 'pending-sync',
+          });
+        }
+      }
+
+      return reconciled;
+    },
+    []
+  );
+
   // Fetch reminders for authenticated user
-  const fetchReminders = useCallback(async (userId: string) => {
-    if (!supabase) return;
-    const currentSeq = ++sequenceRef.current;
-    setLoading(true);
-    setError(null);
+  const fetchReminders = useCallback(
+    async (userId: string) => {
+      const currentSeq = ++sequenceRef.current;
+      setError(null);
 
-    try {
-      const { data, error: fetchErr } = await supabase
-        .from('reminders')
-        .select('*')
-        .eq('user_id', userId)
-        .order('remind_at', { ascending: true });
-
-      if (currentSeq !== sequenceRef.current) return;
-
-      if (fetchErr) {
-        setError('Failed to load reminders from server.');
-        setDbReminders([]);
-      } else {
-        setDbReminders((data || []).map(reminderRowToReminder));
+      // Load durable local cache from IndexedDB first for instant access
+      try {
+        const cached = await getOfflineCacheItem<Reminder[]>(userId, 'reminders');
+        if (cached && currentSeq === sequenceRef.current) {
+          setDbReminders(cached);
+          setDbUserId(userId);
+          setLoading(false);
+        }
+      } catch {
+        // Fallback gracefully
       }
-      setDbUserId(userId);
-    } catch {
-      if (currentSeq !== sequenceRef.current) return;
-      setError('An unexpected network error occurred while loading reminders.');
-      setDbReminders([]);
-      setDbUserId(userId);
-    } finally {
-      if (currentSeq === sequenceRef.current) {
-        setLoading(false);
+
+      if (!supabase) return;
+
+      try {
+        const { data, error: fetchErr } = await supabase
+          .from('reminders')
+          .select('*')
+          .eq('user_id', userId)
+          .order('remind_at', { ascending: true });
+
+        if (currentSeq !== sequenceRef.current) return;
+
+        if (fetchErr) {
+          setError('Offline or server unreachable. Showing locally saved reminders.');
+        } else {
+          const serverReminders = (data || []).map(reminderRowToReminder);
+          const reconciled = await reconcileReminders(userId, serverReminders);
+          if (currentSeq === sequenceRef.current) {
+            setDbReminders(reconciled);
+            setDbUserId(userId);
+            void setOfflineCacheItem(userId, 'reminders', reconciled);
+            setError(null);
+          }
+        }
+      } catch {
+        if (currentSeq !== sequenceRef.current) return;
+        setError('Network offline. Showing locally saved reminders.');
+      } finally {
+        if (currentSeq === sequenceRef.current) {
+          setLoading(false);
+        }
       }
-    }
-  }, []);
+    },
+    [reconcileReminders]
+  );
 
   // Handle user authentication transitions
   useEffect(() => {
@@ -94,38 +183,73 @@ export function useReminders(): UseRemindersReturn {
     };
   }, [user?.id, fetchReminders]);
 
+  // Subscribe to live entity sync events to dynamically update syncStatus in UI
+  useEffect(() => {
+    const unsubscribe = subscribeEntitySync((entityType, entityId, status) => {
+      if (entityType === 'reminder' && user?.id) {
+        setDbReminders((prev) => {
+          const updated = prev.map((r) => (r.id === entityId ? { ...r, syncStatus: status } : r));
+          void setOfflineCacheItem(user.id, 'reminders', updated);
+          return updated;
+        });
+      }
+    });
+    return unsubscribe;
+  }, [user?.id]);
+
   const addReminder = useCallback(
     async (newReminderData: Omit<Reminder, 'id'>) => {
       setError(null);
 
       // Local / unauthenticated demo mode
-      if (!user || !supabase) {
+      if (!user) {
         const newReminder: Reminder = {
           ...newReminderData,
           id: `rem-${Date.now()}`,
+          syncStatus: 'local-only',
         };
         setDemoReminders((prev) => [newReminder, ...prev]);
         return;
       }
 
-      // Authenticated Supabase persistence
+      // Authenticated local-first persistence with outbox queue
+      const reminderId = crypto.randomUUID();
+      const newReminder: Reminder = {
+        ...newReminderData,
+        id: reminderId,
+        syncStatus: 'pending-sync',
+      };
+
+      // 1. Optimistically add to state and local IndexedDB cache
+      setDbReminders((prev) => {
+        const next = [...prev, newReminder];
+        void setOfflineCacheItem(user.id, 'reminders', next);
+        return next;
+      });
+
+      // 2. Enqueue idempotent outbox create operation
       try {
-        const payload = reminderToInsertPayload(newReminderData, user.id);
-        const { data, error: insertErr } = await supabase
-          .from('reminders')
-          .insert(payload)
-          .select('*')
-          .single();
+        const insertPayload = reminderToInsertPayload(
+          { ...newReminderData, id: reminderId },
+          user.id
+        );
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'reminder',
+          entityId: reminderId,
+          action: 'create',
+          payload: insertPayload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        });
 
-        if (insertErr || !data) {
-          setError(insertErr?.message || 'Failed to create reminder on server.');
-          return;
-        }
-
-        const createdReminder = reminderRowToReminder(data);
-        setDbReminders((prev) => [...prev, createdReminder]);
+        // 3. Trigger synchronization engine in background
+        void processOutbox(user.id);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Network error while saving reminder.';
+        const message = err instanceof Error ? err.message : 'Invalid reminder format';
         setError(message);
       }
     },
@@ -137,7 +261,7 @@ export function useReminders(): UseRemindersReturn {
       setError(null);
 
       // Local / unauthenticated demo mode
-      if (!user || !supabase) {
+      if (!user) {
         setDemoReminders((prev) =>
           prev.map((r) => (r.id === reminderId ? { ...r, done: !r.done } : r))
         );
@@ -148,32 +272,33 @@ export function useReminders(): UseRemindersReturn {
       if (!currentReminder) return;
       const nextDone = !currentReminder.done;
 
-      // Safe optimistic update
-      setDbReminders((prev) =>
-        prev.map((r) => (r.id === reminderId ? { ...r, done: nextDone } : r))
-      );
-
-      try {
-        const { error: updateErr } = await supabase
-          .from('reminders')
-          .update({ done: nextDone })
-          .eq('id', reminderId)
-          .eq('user_id', user.id);
-
-        if (updateErr) {
-          // Rollback on failure
-          setDbReminders((prev) =>
-            prev.map((r) => (r.id === reminderId ? { ...r, done: !nextDone } : r))
-          );
-          setError('Failed to update reminder status on server.');
-        }
-      } catch {
-        // Rollback on network exception
-        setDbReminders((prev) =>
-          prev.map((r) => (r.id === reminderId ? { ...r, done: !nextDone } : r))
+      // 1. Optimistic update in state with pending-sync status
+      setDbReminders((prev) => {
+        const next = prev.map((r) =>
+          r.id === reminderId
+            ? { ...r, done: nextDone, syncStatus: 'pending-sync' as const }
+            : r
         );
-        setError('Network error while updating reminder.');
-      }
+        void setOfflineCacheItem(user.id, 'reminders', next);
+        return next;
+      });
+
+      // 2. Enqueue outbox update operation
+      await enqueueOutboxOperation({
+        id: crypto.randomUUID(),
+        scope: user.id,
+        entityType: 'reminder',
+        entityId: reminderId,
+        action: 'update',
+        payload: { done: nextDone },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'pending',
+        retryCount: 0,
+      });
+
+      // 3. Trigger synchronization engine
+      void processOutbox(user.id);
     },
     [user, dbReminders]
   );
@@ -183,44 +308,47 @@ export function useReminders(): UseRemindersReturn {
       setError(null);
 
       // Local / unauthenticated demo mode
-      if (!user || !supabase) {
+      if (!user) {
         setDemoReminders((prev) => prev.filter((r) => r.id !== reminderId));
         return;
       }
 
-      // Optimistic delete with targeted rollback
-      const target = dbReminders.find((r) => r.id === reminderId);
-      if (!target) return;
-      setDbReminders((prev) => prev.filter((r) => r.id !== reminderId));
+      // 1. Immediate optimistic deletion from state & local cache
+      setDbReminders((prev) => {
+        const next = prev.filter((r) => r.id !== reminderId);
+        void setOfflineCacheItem(user.id, 'reminders', next);
+        return next;
+      });
 
-      try {
-        const { error: deleteErr } = await supabase
-          .from('reminders')
-          .delete()
-          .eq('id', reminderId)
-          .eq('user_id', user.id);
+      // 2. Enqueue outbox delete operation
+      await enqueueOutboxOperation({
+        id: crypto.randomUUID(),
+        scope: user.id,
+        entityType: 'reminder',
+        entityId: reminderId,
+        action: 'delete',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'pending',
+        retryCount: 0,
+      });
 
-        if (deleteErr) {
-          setDbReminders((prev) => (prev.some((r) => r.id === reminderId) ? prev : [target, ...prev]));
-          setError('Failed to delete reminder from server.');
-        }
-      } catch {
-        setDbReminders((prev) => (prev.some((r) => r.id === reminderId) ? prev : [target, ...prev]));
-        setError('Network error while deleting reminder.');
-      }
+      // 3. Trigger synchronization engine
+      void processOutbox(user.id);
     },
-    [user, dbReminders]
+    [user]
   );
 
   const retry = useCallback(() => {
     if (user?.id) {
       void fetchReminders(user.id);
+      void processOutbox(user.id);
     }
   }, [user, fetchReminders]);
 
   const resetDemoData = useCallback(() => {
     if (!user) {
-      setDemoReminders(initialReminders);
+      setDemoReminders(initialReminders.map((r) => ({ ...r, syncStatus: 'local-only' })));
       setError(null);
     }
   }, [user]);

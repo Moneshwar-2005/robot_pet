@@ -3,6 +3,7 @@ import type { ClientPetSettings } from '../lib/adapters';
 import { petSettingsRowToClient, petSettingsToUpdatePayload } from '../lib/adapters';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
+import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
 
 export const defaultPetSettings: ClientPetSettings = {
   petName: 'Kuro',
@@ -39,10 +40,22 @@ export function usePetSettings(): UsePetSettingsReturn {
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
   const fetchPetSettings = useCallback(async (userId: string) => {
-    if (!supabase) return;
     const currentSeq = ++sequenceRef.current;
-    setLoading(true);
     setError(null);
+
+    // 1. Instant offline load from local IndexedDB cache
+    try {
+      const cached = await getOfflineCacheItem<ClientPetSettings>(userId, 'pet_settings');
+      if (cached && currentSeq === sequenceRef.current) {
+        setDbSettings(cached);
+        setDbUserId(userId);
+        setLoading(false);
+      }
+    } catch {
+      // Fallback gracefully
+    }
+
+    if (!supabase) return;
 
     try {
       const { data, error: fetchErr } = await supabase
@@ -54,12 +67,15 @@ export function usePetSettings(): UsePetSettingsReturn {
       if (currentSeq !== sequenceRef.current) return;
 
       if (fetchErr) {
-        setError('Failed to load companion settings.');
+        setError('Offline or server unreachable. Showing cached companion settings.');
         return;
       }
 
       if (data) {
-        setDbSettings(petSettingsRowToClient(data));
+        const clientSettings = petSettingsRowToClient(data);
+        setDbSettings(clientSettings);
+        setDbUserId(userId);
+        void setOfflineCacheItem(userId, 'pet_settings', clientSettings);
       } else {
         // If no settings row exists yet for this user, insert default row
         const insertPayload = {
@@ -75,7 +91,10 @@ export function usePetSettings(): UsePetSettingsReturn {
         if (currentSeq !== sequenceRef.current) return;
 
         if (!createErr && created) {
-          setDbSettings(petSettingsRowToClient(created));
+          const clientSettings = petSettingsRowToClient(created);
+          setDbSettings(clientSettings);
+          setDbUserId(userId);
+          void setOfflineCacheItem(userId, 'pet_settings', clientSettings);
         } else {
           setDbSettings(defaultPetSettings);
         }
@@ -83,7 +102,7 @@ export function usePetSettings(): UsePetSettingsReturn {
       setDbUserId(userId);
     } catch {
       if (currentSeq !== sequenceRef.current) return;
-      setError('An unexpected network error occurred while loading companion settings.');
+      setError('Network offline. Showing cached companion settings.');
       setDbUserId(userId);
     } finally {
       if (currentSeq === sequenceRef.current) {
@@ -134,6 +153,7 @@ export function usePetSettings(): UsePetSettingsReturn {
       const previous = dbSettings;
       const updated = { ...dbSettings, ...partial };
       setDbSettings(updated);
+      void setOfflineCacheItem(user.id, 'pet_settings', updated);
       setSaving(true);
 
       try {
@@ -145,6 +165,7 @@ export function usePetSettings(): UsePetSettingsReturn {
 
         if (updateErr) {
           setDbSettings(previous);
+          void setOfflineCacheItem(user.id, 'pet_settings', previous);
           setError(updateErr.message || 'Failed to save companion settings.');
           return false;
         }
@@ -152,7 +173,8 @@ export function usePetSettings(): UsePetSettingsReturn {
         return true;
       } catch {
         setDbSettings(previous);
-        setError('Network error while saving companion settings.');
+        void setOfflineCacheItem(user.id, 'pet_settings', previous);
+        setError('Network offline. Companion settings could not be saved to server.');
         return false;
       } finally {
         setSaving(false);

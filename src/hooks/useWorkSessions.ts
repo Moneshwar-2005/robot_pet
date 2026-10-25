@@ -5,6 +5,7 @@ import type { WorkSummary } from '../types';
 import { initialWorkSummary } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
+import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
 
 export const initialWorkSessions: ClientWorkSession[] = [
   {
@@ -106,7 +107,6 @@ function computeWorkSummary(
     'Sat',
     'Sun',
   ];
-
   const distributionMap: Record<string, number> = {
     Mon: 0,
     Tue: 0,
@@ -117,21 +117,20 @@ function computeWorkSummary(
     Sun: 0,
   };
 
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 6);
+  sevenDaysAgo.setHours(0, 0, 0, 0);
 
-  sessions.forEach((s) => {
-    if (s.sessionType === 'focus' && s.completedAt) {
-      const sessDate = new Date(s.startedAt);
-      const startOfSess = new Date(sessDate.getFullYear(), sessDate.getMonth(), sessDate.getDate()).getTime();
-      const diffCalendarDays = Math.round((startOfToday - startOfSess) / (1000 * 60 * 60 * 24));
-      if (diffCalendarDays >= 0 && diffCalendarDays < 7) {
-        const dayName = DAY_NAMES[sessDate.getDay()];
-        if (dayName in distributionMap) {
-          distributionMap[dayName] += s.durationMinutes / 60;
-        }
+  for (const session of sessions) {
+    if (!session.completedAt) continue;
+    const sessDate = new Date(session.startedAt);
+    if (sessDate >= sevenDaysAgo && sessDate <= today) {
+      const dayName = DAY_NAMES[sessDate.getDay()];
+      if (dayName in distributionMap) {
+        distributionMap[dayName] += session.durationMinutes / 60;
       }
     }
-  });
+  }
 
   const dailyDistribution = weekDays.map((day) => ({
     day,
@@ -166,10 +165,22 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
   const fetchSessions = useCallback(async (userId: string) => {
-    if (!supabase) return;
     const currentSeq = ++sequenceRef.current;
-    setLoading(true);
     setError(null);
+
+    // 1. Instant offline load from local IndexedDB cache
+    try {
+      const cached = await getOfflineCacheItem<ClientWorkSession[]>(userId, 'work_sessions');
+      if (cached && currentSeq === sequenceRef.current) {
+        setDbSessions(cached);
+        setDbUserId(userId);
+        setLoading(false);
+      }
+    } catch {
+      // Fallback gracefully
+    }
+
+    if (!supabase) return;
 
     try {
       const { data, error: fetchErr } = await supabase
@@ -181,16 +192,16 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       if (currentSeq !== sequenceRef.current) return;
 
       if (fetchErr) {
-        setError('Failed to load work session telemetry.');
-        setDbSessions([]);
+        setError('Offline or server unreachable. Showing cached work sessions.');
       } else {
-        setDbSessions((data || []).map(workSessionRowToClient));
+        const clientSessions = (data || []).map(workSessionRowToClient);
+        setDbSessions(clientSessions);
+        setDbUserId(userId);
+        void setOfflineCacheItem(userId, 'work_sessions', clientSessions);
       }
-      setDbUserId(userId);
     } catch {
       if (currentSeq !== sequenceRef.current) return;
-      setError('An unexpected network error occurred while loading work sessions.');
-      setDbSessions([]);
+      setError('Network offline. Showing cached work sessions.');
       setDbUserId(userId);
     } finally {
       if (currentSeq === sequenceRef.current) {
@@ -253,9 +264,12 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         return true;
       }
 
-      // Authenticated persistence
+      // Authenticated persistence: enforce required completed_at
+      const completedAt = data.completedAt || new Date().toISOString();
+      const sessionPayload = { ...data, completedAt };
+
       try {
-        const payload = workSessionToInsertPayload(data, user.id);
+        const payload = workSessionToInsertPayload(sessionPayload, user.id);
         const { data: created, error: insertErr } = await supabase
           .from('work_sessions')
           .insert(payload)
@@ -263,15 +277,19 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
           .single();
 
         if (insertErr || !created) {
-          setError(insertErr?.message || 'Failed to save work session.');
+          setError(insertErr?.message || 'Failed to save work session to server.');
           return false;
         }
 
         const clientSess = workSessionRowToClient(created);
-        setDbSessions((prev) => [clientSess, ...prev]);
+        setDbSessions((prev) => {
+          const next = [clientSess, ...prev];
+          void setOfflineCacheItem(user.id, 'work_sessions', next);
+          return next;
+        });
         return true;
       } catch {
-        setError('Network error while saving work session.');
+        setError('Network offline. Work session could not be saved to server.');
         return false;
       }
     },
@@ -291,7 +309,9 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       // Optimistic delete with targeted rollback
       const target = dbSessions.find((s) => s.id === id);
       if (!target) return false;
-      setDbSessions((prev) => prev.filter((s) => s.id !== id));
+      const nextSessions = dbSessions.filter((s) => s.id !== id);
+      setDbSessions(nextSessions);
+      void setOfflineCacheItem(user.id, 'work_sessions', nextSessions);
 
       try {
         const { error: deleteErr } = await supabase
@@ -302,14 +322,16 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
 
         if (deleteErr) {
           setDbSessions((prev) => (prev.some((s) => s.id === id) ? prev : [target, ...prev]));
-          setError(deleteErr.message || 'Failed to delete work session.');
+          void setOfflineCacheItem(user.id, 'work_sessions', dbSessions);
+          setError(deleteErr.message || 'Failed to delete work session from server.');
           return false;
         }
 
         return true;
       } catch {
         setDbSessions((prev) => (prev.some((s) => s.id === id) ? prev : [target, ...prev]));
-        setError('Network error while deleting work session.');
+        void setOfflineCacheItem(user.id, 'work_sessions', dbSessions);
+        setError('Network offline. Work session deletion could not be saved to server.');
         return false;
       }
     },
@@ -329,8 +351,7 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
     }
   }, [user]);
 
-  // Derive WorkSummary strictly from activeSessions for authenticated accounts, or fallback to mock summary
-  const workSummary = useMemo<WorkSummary>(() => {
+  const workSummary = useMemo(() => {
     return computeWorkSummary(Boolean(user), activeSessions, tasksCompletedCount, totalTasksCount);
   }, [user, activeSessions, tasksCompletedCount, totalTasksCount]);
 

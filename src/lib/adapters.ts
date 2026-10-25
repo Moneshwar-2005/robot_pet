@@ -92,12 +92,13 @@ function parseTimeForPostgres(timeStr: string | null | undefined): string | null
 /**
  * Maps application Task input to a database Insert payload.
  * Preserves nullable fields explicitly and safely converts dates/times.
+ * Preserves client-generated UUID when provided for offline idempotency.
  */
 export function taskToInsertPayload(
-  task: Omit<Task, 'id'>,
+  task: Omit<Task, 'id'> & { id?: string },
   userId: string
 ): TablesInsert<'tasks'> {
-  return {
+  const payload: TablesInsert<'tasks'> = {
     user_id: userId,
     title: task.title.trim(),
     category: task.category,
@@ -109,6 +110,12 @@ export function taskToInsertPayload(
     tags: Array.isArray(task.tags) ? [...task.tags] : [],
     description: task.description ? task.description.trim() : null,
   };
+
+  if (task.id) {
+    payload.id = task.id;
+  }
+
+  return payload;
 }
 
 /**
@@ -130,9 +137,10 @@ export function reminderRowToReminder(row: ReminderRow): Reminder {
  * Maps application Reminder input to a database Insert payload.
  * Requires a valid ISO-8601 timestamp string for remind_at.
  * Rejects UI-only relative strings (e.g. "20 mins left", "In 45 mins") rather than fabricating dates.
+ * Preserves client-generated UUID when provided for offline idempotency.
  */
 export function reminderToInsertPayload(
-  reminder: Omit<Reminder, 'id'>,
+  reminder: Omit<Reminder, 'id'> & { id?: string },
   userId: string
 ): TablesInsert<'reminders'> {
   const rawTime = reminder.time?.trim();
@@ -144,7 +152,7 @@ export function reminderToInsertPayload(
     );
   }
 
-  return {
+  const payload: TablesInsert<'reminders'> = {
     user_id: userId,
     title: reminder.title.trim(),
     remind_at: new Date(timestamp).toISOString(),
@@ -152,6 +160,12 @@ export function reminderToInsertPayload(
     priority: reminder.priority,
     done: reminder.done,
   };
+
+  if (reminder.id) {
+    payload.id = reminder.id;
+  }
+
+  return payload;
 }
 
 export interface ClientPetSettings {

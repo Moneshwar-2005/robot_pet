@@ -322,7 +322,6 @@ export async function sendOllamaChat(params: {
     }
 
     if (err instanceof Error && err.name === 'AbortError') {
-      // Check if user manually aborted vs timed out
       if (callerSignal?.aborted) {
         throw new OllamaClientError('Chat generation was cancelled by user.', 'aborted');
       }
@@ -340,7 +339,217 @@ export async function sendOllamaChat(params: {
       throw new OllamaClientError(
         'Unable to connect to Ollama on ' + baseUrl,
         'unavailable',
-        'Verify that Ollama is running (`ollama serve`). If browser CORS is active, configure `OLLAMA_ORIGINS="*"` or use the Vite proxy.'
+        'Verify that Ollama is running (`ollama serve`). If browser CORS is active, configure `OLLAMA_ORIGINS="http://localhost:5173"` or use the Vite proxy.'
+      );
+    }
+
+    throw new OllamaClientError(
+      `Failed to communicate with Ollama: ${errMsg}`,
+      'error',
+      'Please check Ollama status and try again.'
+    );
+  }
+}
+
+export interface OllamaGenerationOptions {
+  num_predict?: number;
+  temperature?: number;
+  top_p?: number;
+}
+
+export interface OllamaChatStreamParams {
+  baseUrl?: string;
+  model: string;
+  messages: OllamaChatMessage[];
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  options?: OllamaGenerationOptions;
+  keepAlive?: string;
+  onChunk: (delta: string, fullTextSoFar: string) => void;
+}
+
+export interface OllamaChatStreamResult {
+  model: string;
+  content: string;
+  done: boolean;
+  totalDuration?: number;
+  evalCount?: number;
+}
+
+/**
+ * Streams chat response chunks incrementally from Ollama's /api/chat endpoint.
+ * Optimizes TTFT (Time to First Token) and memory retention via keep_alive.
+ */
+export async function sendOllamaChatStream(params: OllamaChatStreamParams): Promise<OllamaChatStreamResult> {
+  const {
+    baseUrl: rawBaseUrl,
+    model,
+    messages,
+    signal: callerSignal,
+    timeoutMs = 90000,
+    options = {
+      num_predict: 384,
+      temperature: 0.6,
+      top_p: 0.9,
+    },
+    keepAlive = '10m',
+    onChunk,
+  } = params;
+
+  if (!model.trim()) {
+    throw new OllamaClientError('No Ollama model selected.', 'error', 'Select a model from the model list.');
+  }
+
+  if (messages.length === 0) {
+    throw new OllamaClientError('Message list cannot be empty.', 'error', 'Please enter a message to send.');
+  }
+
+  const baseUrl = rawBaseUrl || getActiveOllamaBaseUrl();
+  const endpoint = `${baseUrl}/api/chat`;
+  const { signal, cleanup } = createTimeoutSignal(timeoutMs, callerSignal);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson, application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        options,
+        keep_alive: keepAlive,
+      }),
+      signal,
+    });
+
+    if (!res.ok) {
+      cleanup();
+      let errorBody = '';
+      try {
+        const json = await res.json();
+        errorBody = typeof json?.error === 'string' ? json.error : JSON.stringify(json);
+      } catch {
+        errorBody = res.statusText;
+      }
+
+      if (res.status === 404) {
+        throw new OllamaClientError(
+          `Model "${model}" not found in Ollama.`,
+          'unavailable',
+          `Run \`ollama pull ${model}\` in your terminal to install it.`
+        );
+      }
+
+      throw new OllamaClientError(
+        `Ollama returned error ${res.status}: ${errorBody}`,
+        'error',
+        'Check Ollama logs or try another installed model.'
+      );
+    }
+
+    if (!res.body) {
+      cleanup();
+      throw new OllamaClientError('No readable stream body returned from Ollama.', 'invalid_response');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+
+    let accumulatedContent = '';
+    let buffer = '';
+    let finalModel = model;
+    let totalDuration: number | undefined;
+    let evalCount: number | undefined;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const textChunk = decoder.decode(value, { stream: true });
+        buffer += textChunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          try {
+            const data = JSON.parse(trimmed);
+            if (data.model) finalModel = data.model;
+            if (data.total_duration) totalDuration = data.total_duration;
+            if (data.eval_count) evalCount = data.eval_count;
+
+            const delta = data.message?.content || '';
+            if (delta) {
+              accumulatedContent += delta;
+              onChunk(delta, accumulatedContent);
+            }
+          } catch {
+            // Incomplete or non-JSON chunk ignored defensively
+          }
+        }
+      }
+
+      // Check trailing buffer
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer.trim());
+          if (data.model) finalModel = data.model;
+          if (data.total_duration) totalDuration = data.total_duration;
+          if (data.eval_count) evalCount = data.eval_count;
+
+          const delta = data.message?.content || '';
+          if (delta) {
+            accumulatedContent += delta;
+            onChunk(delta, accumulatedContent);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } finally {
+      reader.releaseLock();
+      cleanup();
+    }
+
+    return {
+      model: finalModel,
+      content: accumulatedContent,
+      done: true,
+      totalDuration,
+      evalCount,
+    };
+  } catch (err: unknown) {
+    cleanup();
+
+    if (err instanceof OllamaClientError) {
+      throw err;
+    }
+
+    if (err instanceof Error && err.name === 'AbortError') {
+      if (callerSignal?.aborted) {
+        throw new OllamaClientError('Chat generation was cancelled by user.', 'aborted');
+      }
+      throw new OllamaClientError(
+        `Ollama request timed out after ${timeoutMs}ms.`,
+        'timeout',
+        'The model may be compiling or loading into VRAM. Try again or choose a smaller model.'
+      );
+    }
+
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isNetworkOrCors = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError');
+
+    if (isNetworkOrCors) {
+      throw new OllamaClientError(
+        'Unable to connect to Ollama on ' + baseUrl,
+        'unavailable',
+        'Verify that Ollama is running (`ollama serve`). If browser CORS is active, configure `OLLAMA_ORIGINS="http://localhost:5173"` or use the Vite proxy.'
       );
     }
 

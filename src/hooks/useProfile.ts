@@ -3,6 +3,7 @@ import type { UserProfile } from '../lib/adapters';
 import { userProfileRowToClient } from '../lib/adapters';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
+import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
 
 export interface UseProfileReturn {
   profile: UserProfile | null;
@@ -28,10 +29,22 @@ export function useProfile(): UseProfileReturn {
   const activeLoading = user ? (profileUserId === user.id ? loading : true) : false;
 
   const fetchProfile = useCallback(async (userId: string, userEmail?: string | null) => {
-    if (!supabase) return;
     const currentSeq = ++sequenceRef.current;
-    setLoading(true);
     setError(null);
+
+    // 1. Instant offline load from local IndexedDB cache
+    try {
+      const cached = await getOfflineCacheItem<UserProfile>(userId, 'profile');
+      if (cached && currentSeq === sequenceRef.current) {
+        setProfile(cached);
+        setProfileUserId(userId);
+        setLoading(false);
+      }
+    } catch {
+      // Fallback gracefully
+    }
+
+    if (!supabase) return;
 
     try {
       const { data, error: fetchErr } = await supabase
@@ -43,24 +56,27 @@ export function useProfile(): UseProfileReturn {
       if (currentSeq !== sequenceRef.current) return;
 
       if (fetchErr) {
-        setError('Failed to load user profile from server.');
-        setProfile(null);
+        setError('Offline or server unreachable. Showing cached profile.');
       } else if (data) {
-        setProfile(userProfileRowToClient(data));
+        const clientProfile = userProfileRowToClient(data);
+        setProfile(clientProfile);
+        setProfileUserId(userId);
+        void setOfflineCacheItem(userId, 'profile', clientProfile);
       } else {
-        // Profile row does not exist in public.users yet; gracefully provide in-memory view
-        setProfile({
+        // Profile row does not exist in public.users yet; gracefully provide fallback
+        const fallbackProfile: UserProfile = {
           id: userId,
           email: userEmail ?? null,
           fullName: null,
           avatarUrl: null,
-        });
+        };
+        setProfile(fallbackProfile);
+        setProfileUserId(userId);
+        void setOfflineCacheItem(userId, 'profile', fallbackProfile);
       }
-      setProfileUserId(userId);
     } catch {
       if (currentSeq !== sequenceRef.current) return;
-      setError('An unexpected network error occurred while loading profile.');
-      setProfile(null);
+      setError('Network offline. Showing cached profile.');
       setProfileUserId(userId);
     } finally {
       if (currentSeq === sequenceRef.current) {
@@ -100,44 +116,55 @@ export function useProfile(): UseProfileReturn {
 
   const updateFullName = useCallback(
     async (newFullName: string): Promise<boolean> => {
-      if (!user || !supabase) {
-        setError('Cannot update profile: not authenticated.');
-        return false;
-      }
+      if (!user || !supabase) return false;
 
+      const trimmedName = newFullName.trim();
+      const previous = profile;
       setError(null);
       setSaving(true);
-      const previous = profile;
-      const trimmed = newFullName.trim();
 
-      // Safe optimistic update
-      setProfile((prev) =>
-        prev
-          ? { ...prev, fullName: trimmed || null }
-          : {
-              id: user.id,
-              email: user.email ?? null,
-              fullName: trimmed || null,
-              avatarUrl: null,
-            }
-      );
+      const optimistic: UserProfile = {
+        id: user.id,
+        email: user.email ?? profile?.email ?? null,
+        fullName: trimmedName,
+        avatarUrl: profile?.avatarUrl ?? null,
+      };
+
+      // Optimistic update
+      setProfile(optimistic);
+      void setOfflineCacheItem(user.id, 'profile', optimistic);
 
       try {
         const { error: updateErr } = await supabase
           .from('users')
-          .update({ full_name: trimmed || null })
+          .update({ full_name: trimmedName, updated_at: new Date().toISOString() })
           .eq('id', user.id);
 
         if (updateErr) {
-          setProfile(previous);
-          setError(updateErr.message || 'Failed to update profile name on server.');
-          return false;
+          // If row didn't exist, attempt insert
+          const { error: insertErr } = await supabase.from('users').insert({
+            id: user.id,
+            email: user.email ?? null,
+            full_name: trimmedName,
+          });
+
+          if (insertErr) {
+            setProfile(previous);
+            if (previous) {
+              void setOfflineCacheItem(user.id, 'profile', previous);
+            }
+            setError(insertErr.message || 'Failed to update profile name on server.');
+            return false;
+          }
         }
 
         return true;
       } catch {
         setProfile(previous);
-        setError('Network error while updating profile name.');
+        if (previous) {
+          void setOfflineCacheItem(user.id, 'profile', previous);
+        }
+        setError('Network offline. Profile name could not be saved to server.');
         return false;
       } finally {
         setSaving(false);

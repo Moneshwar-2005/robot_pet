@@ -17,9 +17,19 @@ import {
   AlertCircle,
   RefreshCw,
   Loader2,
+  Wifi,
+  WifiOff,
+  HardDrive,
+  Smartphone,
 } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { supabaseEnvErrors } from '../lib/supabase';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { usePWAInstall } from '../hooks/usePWAInstall';
+import { useSyncStatus } from '../hooks/useSyncStatus';
+import { MobileAICompatibilityCard } from '../components/settings/MobileAICompatibilityCard';
+import { DesktopCompanionCard } from '../components/settings/DesktopCompanionCard';
+
 
 interface SettingsPageProps {
   theme: Theme;
@@ -47,6 +57,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   onRetryProfile,
 }) => {
   const { user, signOut, isConfigured } = useAuth();
+  const { isOnline } = useNetworkStatus();
+  const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
+  const { isSyncing, pendingCount, lastSyncedAt, lastError, triggerSync } = useSyncStatus();
   const [fullNameInput, setFullNameInput] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -167,7 +180,124 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Progressive Web App & Offline Foundation */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title-group">
+                <HardDrive className="card-icon" style={{ color: 'var(--accent-primary)' }} />
+                <h3 className="card-title">PWA &amp; Offline Foundation</h3>
+              </div>
+              <span className={`badge ${isOnline ? 'badge-active' : 'badge-warning'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                {isOnline ? <Wifi size={11} /> : <WifiOff size={11} />}
+                <span>{isOnline ? 'Network Online' : 'Offline Mode'}</span>
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Application Installation</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {isInstalled
+                      ? 'Running as installed standalone desktop/mobile app'
+                      : isInstallable
+                        ? 'Ready for desktop or mobile installation'
+                        : 'Web browser mode (PWA manifest active)'}
+                  </p>
+                </div>
+
+                {isInstalled ? (
+                  <span className="badge badge-active" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Check size={11} /> Installed
+                  </span>
+                ) : isInstallable ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={promptInstall}
+                    style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Smartphone size={13} />
+                    <span>Install Kuro</span>
+                  </button>
+                ) : (
+                  <span className="badge badge-neutral">Browser Mode</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div>
+                  <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Service Worker App Shell</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Cached version: kuro-app-shell-v1</div>
+                </div>
+                <span className="badge badge-active">Active</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div>
+                  <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>IndexedDB Offline Storage</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>kuro_offline_db v2 initialized with Outbox</div>
+                </div>
+                <span className="badge badge-active">Ready</span>
+              </div>
+
+              {/* Offline Synchronization Status (Step 3.5) */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div>
+                  <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Supabase Data Synchronization</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    {user
+                      ? pendingCount > 0
+                        ? `${pendingCount} operation(s) waiting to synchronize`
+                        : lastSyncedAt
+                          ? `All changes synchronized (${new Date(lastSyncedAt).toLocaleTimeString()})`
+                          : 'Synchronized with Supabase'
+                      : 'Local demo mode (no remote sync)'}
+                  </div>
+                  {lastError && (
+                    <div style={{ fontSize: '11px', color: 'var(--status-yellow)', marginTop: '2px' }}>
+                      {lastError}
+                    </div>
+                  )}
+                </div>
+
+                {user && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => triggerSync()}
+                    disabled={isSyncing}
+                    style={{ padding: '4px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                    title="Process pending outbox synchronization immediately"
+                  >
+                    <RefreshCw size={12} style={{ animation: isSyncing ? 'spin 1s linear infinite' : undefined }} />
+                    <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div>
+                  <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Offline AI Capability</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Local Ollama remains functional offline</div>
+                </div>
+                <span className="badge badge-active">100% On-Device</span>
+              </div>
+
+              <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
+                Kuro uses a local-first architecture. Tasks and reminders are saved to IndexedDB first for instant responsiveness. When online, pending operations synchronize automatically with Supabase.
+              </p>
+            </div>
+          </div>
+
+          {/* Mobile & On-Device AI Compatibility Probe (Step 3.6.1) */}
+          <MobileAICompatibilityCard />
+
+          {/* Windows Desktop Companion Foundation (Step 4.1) */}
+          <DesktopCompanionCard />
         </div>
+
 
         {/* Right Column: Account Management & Privacy */}
         <div className="col-6" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -382,9 +512,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>Local-Only AI Processing Mode</div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Configured for local LLM inference</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Provider-independent architecture (Local Ollama active)</div>
                 </div>
-                <span className="badge badge-phase">Planned (Phase 2)</span>
+                <span className="badge badge-active">Active (Ollama)</span>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
