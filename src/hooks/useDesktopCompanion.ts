@@ -22,6 +22,7 @@ import {
   getCompanionTrackingStatus,
   getCompanionTrackingSessions,
   clearCompanionTrackingSessions,
+  getCompanionBrowserTab,
   getStoredPairingToken,
   clearStoredPairingToken,
   COMPANION_DEFAULT_URL,
@@ -49,6 +50,9 @@ export interface UseDesktopCompanionReturn {
   stopTracking: () => Promise<boolean>;
   clearHistory: () => Promise<boolean>;
   refreshTracking: () => Promise<void>;
+
+  // Phase 7.4 Active Browser Tab
+  activeBrowserTab: { hostname: string; title: string; timestamp: number } | null;
 }
 
 export function useDesktopCompanion(baseUrl = COMPANION_DEFAULT_URL): UseDesktopCompanionReturn {
@@ -65,6 +69,7 @@ export function useDesktopCompanion(baseUrl = COMPANION_DEFAULT_URL): UseDesktop
   const [activeSession, setActiveSession] = useState<CompanionIdeSession | null>(null);
   const [recentSessions, setRecentSessions] = useState<CompanionIdeSession[]>([]);
   const [isTrackingBusy, setIsTrackingBusy] = useState<boolean>(false);
+  const [activeBrowserTab, setActiveBrowserTab] = useState<{ hostname: string; title: string; timestamp: number } | null>(null);
 
   const isMountedRef = useRef(true);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,9 +79,10 @@ export function useDesktopCompanion(baseUrl = COMPANION_DEFAULT_URL): UseDesktop
     if (!token) return;
 
     try {
-      const [tStatus, sData] = await Promise.all([
+      const [tStatus, sData, bData] = await Promise.all([
         getCompanionTrackingStatus(token, baseUrl),
         getCompanionTrackingSessions(token, baseUrl),
+        getCompanionBrowserTab(token, baseUrl).catch(() => ({ status: 'error', tab: null })),
       ]);
 
       if (!isMountedRef.current) return;
@@ -84,8 +90,36 @@ export function useDesktopCompanion(baseUrl = COMPANION_DEFAULT_URL): UseDesktop
       setIsTracking(tStatus.isTracking);
       setActiveSession(sData.currentSession || tStatus.activeSession || null);
       setRecentSessions(sData.sessions || []);
-    } catch {
-      // Non-fatal tracking poll error
+      setActiveBrowserTab(bData.tab || null);
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+
+      const errorMsg = err instanceof Error ? err.message : String(err);
+
+      // Case 1: Unauthorized (companion restarted with a new session token)
+      if (errorMsg.includes('401') || errorMsg.includes('UNAUTHORIZED')) {
+        clearStoredPairingToken();
+        setStoredToken(null);
+        setStatus(null);
+        setConnectionState('running_unpaired');
+        setIsTracking(false);
+        setActiveSession(null);
+        setErrorMessage('Companion restarted with a new session token. Please enter the new pairing token.');
+        return;
+      }
+
+      // Case 2: Server stopped or unreachable (failed to fetch, connection refused)
+      try {
+        await checkCompanionHealth(baseUrl);
+      } catch {
+        if (!isMountedRef.current) return;
+        setConnectionState('not_running');
+        setHealth(null);
+        setStatus(null);
+        setIsTracking(false);
+        setActiveSession(null);
+        setErrorMessage('Desktop companion service is unreachable or stopped.');
+      }
     }
   }, [baseUrl]);
 
@@ -344,5 +378,8 @@ export function useDesktopCompanion(baseUrl = COMPANION_DEFAULT_URL): UseDesktop
     stopTracking,
     clearHistory,
     refreshTracking,
+
+    // Phase 7.4 Active Browser Tab
+    activeBrowserTab,
   };
 }

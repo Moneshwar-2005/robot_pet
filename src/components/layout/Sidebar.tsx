@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems: NavItemConfig[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'primary' },
-    { id: 'pet-studio', label: 'Pet Studio', icon: Bot, badge: 'Live OLED', section: 'primary' },
+    { id: 'pet-studio', label: 'Pet Studio', icon: Bot, badge: 'Visor', section: 'primary' },
     { id: 'assistant', label: 'Personal Assistant', icon: MessageSquareText, section: 'primary' },
     { id: 'tasks', label: 'Tasks & Projects', icon: CheckSquare, badge: pendingTasksCount, section: 'productivity' },
     { id: 'reminders', label: 'Reminders & Calendar', icon: CalendarClock, badge: upcomingRemindersCount, section: 'productivity' },

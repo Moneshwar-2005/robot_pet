@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Kuro Companion — Active Tab Bridge",
+  "version": "1.0.0",
+  "description": "Privacy-first active tab domain bridge for Kuro Smart Robot Pet. Zero page DOM access, zero history collection.",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:48199/*",
+    "http://localhost:48199/*"
+  ],
+  "action": {
+    "default_title": "Kuro Browser Activity Settings",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

@@ -37,6 +37,9 @@ import {
   IdeActivityTracker,
   loadPersistedSessions,
   savePersistedSessions,
+  extractAuthToken,
+  verifyToken,
+  isOriginAllowed,
 } from './server.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -296,6 +299,42 @@ async function runTestSuite() {
     assert(stopRes.status === 200, 'POST /api/tracking/stop with valid token returns 200');
     assert(stopRes.body.isTracking === false, 'Stop response confirms isTracking: false');
 
+    // 15b. Idempotent stop: calling stop when already stopped succeeds safely
+    const stopAgainRes = await request({
+      path: '/api/tracking/stop',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serverSessionToken}` },
+    });
+    assert(stopAgainRes.status === 200, 'POST /api/tracking/stop when already stopped returns 200 (idempotent stop)');
+
+    // 15c. Idempotent start: calling start twice maintains single active state
+    await request({
+      path: '/api/tracking/start',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serverSessionToken}` },
+    });
+    const startAgainRes = await request({
+      path: '/api/tracking/start',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serverSessionToken}` },
+    });
+    assert(startAgainRes.status === 200 && startAgainRes.body.isTracking === true, 'POST /api/tracking/start when already tracking returns 200 (idempotent start)');
+
+    // 15d. Authorization tolerance: lowercase "bearer" header works
+    const statusBearerRes = await request({
+      path: '/api/tracking/status',
+      method: 'GET',
+      headers: { Authorization: `bearer ${serverSessionToken}` },
+    });
+    assert(statusBearerRes.status === 200, 'GET /api/tracking/status accepts lowercase bearer token');
+
+    // Clean stop after idempotency test
+    await request({
+      path: '/api/tracking/stop',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serverSessionToken}` },
+    });
+
     // 16. Tracking history clear
     const clearRes = await request({
       path: '/api/tracking/clear',
@@ -304,6 +343,14 @@ async function runTestSuite() {
     });
     assert(clearRes.status === 200, 'POST /api/tracking/clear returns 200');
     assert(clearRes.body.status === 'ok', 'Clear response status ok');
+
+    // 16b. Idempotent clear: clearing when already empty is safe
+    const clearAgainRes = await request({
+      path: '/api/tracking/clear',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serverSessionToken}` },
+    });
+    assert(clearAgainRes.status === 200, 'POST /api/tracking/clear when already empty returns 200');
 
     // 17. Step 4.3 Persistence: Atomic save and load validation
     const testStorageFile = path.join(__dirname, '.test_storage_sessions.json');
@@ -443,14 +490,37 @@ async function runTestSuite() {
       if (fs.existsSync(unitStorageFile)) fs.unlinkSync(unitStorageFile);
     }
 
-    // 21. Shutdown endpoint
+    // 21. Unit tests for auth helpers
+    assert(extractAuthToken({ headers: { authorization: 'Bearer abc123def' } }) === 'abc123def', 'extractAuthToken parses standard Bearer header');
+    assert(extractAuthToken({ headers: { authorization: 'bearer abc123def' } }) === 'abc123def', 'extractAuthToken parses lowercase bearer header');
+    assert(extractAuthToken({ headers: { 'x-kuro-companion-token': 'custom-tok' } }) === 'custom-tok', 'extractAuthToken parses X-Kuro-Companion-Token');
+    assert(extractAuthToken({ headers: {} }) === null, 'extractAuthToken returns null when header is missing');
+    assert(isOriginAllowed(null) === true, 'isOriginAllowed allows null/internal origin');
+    assert(isOriginAllowed('http://localhost:5173') === true, 'isOriginAllowed allows localhost:5173');
+    assert(isOriginAllowed('http://malicious-site.com') === false, 'isOriginAllowed rejects untrusted origins');
+    assert(verifyToken(serverSessionToken, serverSessionToken) === true, 'verifyToken validates identical token');
+    assert(verifyToken('wrong-token', serverSessionToken) === false, 'verifyToken rejects wrong token');
+
+    // 22. Shutdown security: invalid token returns 401 and DOES NOT terminate server
+    const badShutdownRes = await request({
+      path: '/api/shutdown',
+      method: 'POST',
+      headers: { Authorization: 'Bearer bad-token-12345' },
+    });
+    assert(badShutdownRes.status === 401, 'POST /api/shutdown with bad token returns 401 Unauthorized');
+
+    // Server must still be responsive
+    const healthAfterBadShutdown = await request({ path: '/api/health', method: 'GET' });
+    assert(healthAfterBadShutdown.status === 200, 'Server remains alive and healthy after rejected shutdown attempt');
+
+    // 23. Shutdown endpoint with valid token
     exitCleanly = true;
     const shutdownRes = await request({
       path: '/api/shutdown',
       method: 'POST',
       headers: { Authorization: `Bearer ${serverSessionToken}` },
     });
-    assert(shutdownRes.status === 200, 'POST /api/shutdown with token returns 200');
+    assert(shutdownRes.status === 200, 'POST /api/shutdown with valid token returns 200');
 
     // Wait for server to exit
     await new Promise((resolve) => setTimeout(resolve, 350));

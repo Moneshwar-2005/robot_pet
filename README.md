@@ -8,7 +8,7 @@ A modern, responsive web application shell and companion dashboard for **Kuro**,
 
 - **Phase 1: Web Application Shell & Dashboard** *(Current)*
   - Responsive desktop & mobile layout.
-  - Simulated 1.5" OLED head visor display with animated digital eyes and dynamic moods (`Attentive`, `Happy`, `Curious`, `Thinking`, `Sleepy`, `Playful`).
+  - Simulated 2.4" TFT LCD head visor display (320x240) with animated digital eyes, speaking mouth, and 10 dynamic moods.
   - 10 Navigation pages: Dashboard, Pet Studio, Personal Assistant, Tasks & Projects, Reminders & Calendar, Work Tracking (Pomodoro), Daily Reports, AI & Memory, Integrations, and Settings & Privacy.
   - Dark and Light theme support.
   - Clean client-side state models for tasks, reminders, and context.
@@ -16,10 +16,10 @@ A modern, responsive web application shell and companion dashboard for **Kuro**,
   - Supabase integration with Row Level Security (RLS).
   - User authentication and persistent cross-device synchronization.
   - Conversational AI backend and memory embeddings.
-- **Phase 3: Physical Robot Hardware**
-  - ESP32-S3 microcontroller integration.
-  - Dual pan/tilt head servo articulation.
-  - Physical 128x64 I2C OLED display synchronization via WebBluetooth / WiFi.
+- **Phase 7: Physical Robot Hardware**
+  - ESP32-S3 microcontroller integration with rear USB-C power.
+  - Screen-only box-shaped desktop enclosure (no servos, no motors, no speakers).
+  - Physical 2.4-inch TFT LCD (320x240 SPI) display synchronization via local Wi-Fi / WebSockets.
 
 ---
 

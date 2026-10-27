@@ -141,7 +141,13 @@ export const Header: React.FC<HeaderProps> = ({
           <span style={{ color: 'var(--text-muted)' }}>•</span>
           <span style={{ textTransform: 'capitalize' }}>{currentMood}</span>
           <span style={{ color: 'var(--text-muted)' }}>•</span>
-          <span className="mono">{petStatus.batteryLevel}%</span>
+          {petStatus.hardwareConnected && petStatus.hasPhysicalBattery && petStatus.batteryLevel !== null ? (
+            <span className="mono" title={`Validated Battery: ${petStatus.batteryLevel}%`}>{petStatus.batteryLevel}%</span>
+          ) : petStatus.hardwareConnected ? (
+            <span className="mono" title="Connected via Rear USB-C Power (No Battery)">USB POWER</span>
+          ) : (
+            <span className="mono" title="Software Simulator Mode — Physical Hardware Offline">SIMULATED</span>
+          )}
         </div>
 
         {/* User Account / Auth Actions */}

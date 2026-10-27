@@ -6,11 +6,15 @@ import { AuthProvider } from './context/AuthContext';
 import { AuthModal } from './components/auth/AuthModal';
 import { useTasks } from './hooks/useTasks';
 import { useReminders } from './hooks/useReminders';
-import { usePetSettings } from './hooks/usePetSettings';
+import { usePetSettings, defaultPetSettings } from './hooks/usePetSettings';
 import { useMemories } from './hooks/useMemories';
 import { useWorkSessions } from './hooks/useWorkSessions';
 import { useProfile } from './hooks/useProfile';
 import { useAuth } from './context/useAuth';
+import { useReminderNotifications } from './hooks/useReminderNotifications';
+import { useAutonomousPet } from './hooks/useAutonomousPet';
+import { useDesktopCompanion } from './hooks/useDesktopCompanion';
+import { BellRing, X, Check } from 'lucide-react';
 import { DashboardPage } from './pages/DashboardPage';
 import { PetStudioPage } from './pages/PetStudioPage';
 import { AssistantPage } from './pages/AssistantPage';
@@ -61,6 +65,12 @@ function AppContent() {
   } = useReminders();
 
   const {
+    alerts: reminderAlerts,
+    dismissAlert: dismissReminderAlert,
+    acknowledgeAlert: acknowledgeReminderAlert,
+  } = useReminderNotifications(reminders, toggleReminder);
+
+  const {
     petSettings,
     loading: petSettingsLoading,
     saving: petSettingsSaving,
@@ -95,6 +105,43 @@ function AppContent() {
     resetDemoData: resetSessionsDemoData,
   } = useWorkSessions(completedTasksCount, totalTasksCount);
 
+  // Companion & Browser awareness integration
+  const {
+    connectionState: companionConnectionState,
+    activeSession: companionActiveSession,
+    isTracking: companionIsTracking,
+    activeBrowserTab,
+  } = useDesktopCompanion();
+
+  // Autonomous Digital Pet Engine (Phase 7.4)
+  const autonomousPet = useAutonomousPet({
+    tasks,
+    reminders,
+    petSettings,
+    updatePetSettings,
+    focusSession: null,
+    companionState:
+      companionConnectionState === 'running_paired'
+        ? {
+            isTracking: companionIsTracking,
+            activeIde: companionActiveSession?.ideName || null,
+            activeProject: companionActiveSession?.project || null,
+          }
+        : null,
+    browserState: activeBrowserTab
+      ? {
+          activeTab: activeBrowserTab,
+          isTracking: Boolean(petSettings.browserAwarenessEnabled),
+        }
+      : null,
+    initialMood: currentMood,
+  });
+
+  const handleMoodChange = (mood: PetMood) => {
+    setCurrentMood(mood);
+    autonomousPet.setMood(mood);
+  };
+
   // Sync theme with HTML data-theme attribute
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -104,13 +151,19 @@ function AppContent() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const handleResetPetSettings = async () => {
+    resetPetSettingsDemoData();
+    await updatePetSettings(defaultPetSettings);
+    handleMoodChange('attentive');
+  };
+
   const handleResetData = () => {
     resetTasksDemoData();
     resetRemindersDemoData();
     resetPetSettingsDemoData();
     resetMemoriesDemoData();
     resetSessionsDemoData();
-    setCurrentMood('attentive');
+    handleMoodChange('attentive');
   };
 
   const pendingTasksCount = tasks.filter((t) => !t.completed).length;
@@ -130,8 +183,16 @@ function AppContent() {
         return (
           <DashboardPage
             petStatus={activePetStatus}
-            currentMood={currentMood}
-            onMoodChange={setCurrentMood}
+            currentMood={autonomousPet.currentMood}
+            onMoodChange={handleMoodChange}
+            eyeShape={petSettings.eyeShape}
+            glowColor={petSettings.glowColor}
+            mouthStyle={autonomousPet.mouthStyle}
+            eyeStyle={autonomousPet.eyeStyle}
+            speechText={autonomousPet.speechText}
+            isSpeaking={autonomousPet.isSpeaking}
+            onSpeechEnd={autonomousPet.stopSpeech}
+            onCancelSpeech={autonomousPet.stopSpeech}
             userName={displayName}
             tasks={tasks}
             tasksLoading={tasksLoading}
@@ -152,14 +213,22 @@ function AppContent() {
         return (
           <PetStudioPage
             petStatus={activePetStatus}
-            currentMood={currentMood}
-            onMoodChange={setCurrentMood}
+            currentMood={autonomousPet.currentMood}
+            onMoodChange={handleMoodChange}
             petSettings={petSettings}
             loading={petSettingsLoading}
             saving={petSettingsSaving}
             error={petSettingsError}
             onUpdatePetSettings={updatePetSettings}
+            onResetPetSettings={handleResetPetSettings}
             onRetry={retryPetSettings}
+            autonomousMouthStyle={autonomousPet.mouthStyle}
+            autonomousEyeStyle={autonomousPet.eyeStyle}
+            autonomousSpeechText={autonomousPet.speechText}
+            autonomousIsSpeaking={autonomousPet.isSpeaking}
+            isAutonomousPaused={autonomousPet.isPaused}
+            onPauseAutonomy={autonomousPet.pauseAutonomy}
+            onResumeAutonomy={autonomousPet.resumeAutonomy}
           />
         );
       case 'assistant':
@@ -192,6 +261,9 @@ function AppContent() {
             onAddReminder={addReminder}
             onDeleteReminder={deleteReminder}
             onRetry={retryReminders}
+            focusMinutesToday={workSummary.focusMinutesToday}
+            onSetPetMood={handleMoodChange}
+            onNavigate={setCurrentPage}
           />
         );
       case 'work-tracking':
@@ -222,7 +294,14 @@ function AppContent() {
           />
         );
       case 'integrations':
-        return <IntegrationsPage />;
+        return (
+          <IntegrationsPage
+            reminders={reminders}
+            tasks={tasks}
+            sessions={sessions}
+            onNavigate={setCurrentPage}
+          />
+        );
       case 'settings':
         return (
           <SettingsPage
@@ -236,6 +315,10 @@ function AppContent() {
             profileError={profileError}
             onUpdateFullName={updateFullName}
             onRetryProfile={retryProfile}
+            tasks={tasks}
+            reminders={reminders}
+            petSettings={petSettings}
+            sessions={sessions}
           />
         );
       default:
@@ -244,6 +327,8 @@ function AppContent() {
             petStatus={activePetStatus}
             currentMood={currentMood}
             onMoodChange={setCurrentMood}
+            eyeShape={petSettings.eyeShape}
+            glowColor={petSettings.glowColor}
             userName={displayName}
             tasks={tasks}
             tasksLoading={tasksLoading}
@@ -271,13 +356,91 @@ function AppContent() {
         theme={theme}
         onToggleTheme={toggleTheme}
         petStatus={activePetStatus}
-        currentMood={currentMood}
+        currentMood={autonomousPet.currentMood}
         pendingTasksCount={pendingTasksCount}
         upcomingRemindersCount={upcomingRemindersCount}
         onOpenAuthModal={() => setAuthModalOpen(true)}
       >
         {renderActivePage()}
       </AppLayout>
+
+      {/* Floating In-App Foreground Reminder Alerts */}
+      {reminderAlerts.length > 0 && (
+        <aside
+          aria-label="Reminder Alerts"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            maxWidth: '380px',
+            width: 'calc(100vw - 40px)',
+          }}
+        >
+          {reminderAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="card"
+              style={{
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+                border: '1px solid var(--accent-primary)',
+                backgroundColor: 'var(--bg-card)',
+                padding: '12px 14px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <BellRing size={18} style={{ color: 'var(--status-amber)', flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <h4 style={{ margin: '0 0 2px 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {alert.title}
+                    </h4>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {alert.timeDisplay || 'Due now'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => dismissReminderAlert(alert.id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '2px',
+                  }}
+                  title="Dismiss alert"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '11px', padding: '3px 8px' }}
+                  onClick={() => dismissReminderAlert(alert.id)}
+                >
+                  Snooze
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontSize: '11px', padding: '3px 10px' }}
+                  onClick={() => acknowledgeReminderAlert(alert.reminderId)}
+                >
+                  <Check size={12} style={{ marginRight: '4px' }} /> Acknowledge
+                </button>
+              </div>
+            </div>
+          ))}
+        </aside>
+      )}
 
       <AuthModal
         isOpen={authModalOpen}

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import type { Reminder } from '../types';
+import type { PageId, PetMood, Reminder } from '../types';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
 import { formatReminderDisplay, formatLocalDateString } from '../lib/formatters';
+import { useReminderNotifications } from '../hooks/useReminderNotifications';
+import { useAutomation } from '../hooks/useAutomation';
 import {
   CalendarClock,
   Plus,
@@ -10,10 +12,15 @@ import {
   Coffee,
   Users,
   Bell,
+  BellRing,
   AlertCircle,
   Trash2,
   RefreshCw,
   Loader2,
+  Zap,
+  Play,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
 
 interface RemindersPageProps {
@@ -24,6 +31,9 @@ interface RemindersPageProps {
   onAddReminder: (newReminder: Omit<Reminder, 'id'>) => void;
   onDeleteReminder?: (reminderId: string) => void;
   onRetry?: () => void;
+  focusMinutesToday?: number;
+  onSetPetMood?: (mood: PetMood) => void;
+  onNavigate?: (page: PageId) => void;
 }
 
 export const RemindersPage: React.FC<RemindersPageProps> = ({
@@ -34,6 +44,9 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
   onAddReminder,
   onDeleteReminder,
   onRetry,
+  focusMinutesToday = 0,
+  onSetPetMood,
+  onNavigate,
 }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [title, setTitle] = useState('');
@@ -41,6 +54,39 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
   const [time, setTime] = useState('17:30');
   const [type, setType] = useState<Reminder['type']>('wellness');
   const [priority, setPriority] = useState<Reminder['priority']>('normal');
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+
+  const { permission, isSupported, requestPermission, testNotification } = useReminderNotifications(
+    reminders,
+    onToggleReminder
+  );
+
+  const {
+    globalEnabled: autoEnabled,
+    setGlobalEnabled: setAutoEnabled,
+    rules: autoRules,
+    toggleRule: toggleAutoRule,
+    pendingConfirmations,
+    confirmAction,
+    cancelAction,
+    triggerManual,
+  } = useAutomation({
+    focusMinutesToday,
+    onAddReminder,
+    onSetPetMood,
+    onNavigate,
+  });
+
+  const handleRequestPermission = async () => {
+    const res = await requestPermission();
+    if (res === 'granted') {
+      testNotification();
+      setNotificationMsg('Browser notifications active! Test alert dispatched.');
+    } else if (res === 'denied') {
+      setNotificationMsg('Notifications blocked in browser. Using in-app alert cards.');
+    }
+    setTimeout(() => setNotificationMsg(null), 4000);
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,10 +201,93 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PlannedFeatureNotice
-        phase="Phase 3: Offline Data &amp; Sync"
-        title="Reminders &amp; Routine Calendar"
-        description="Schedule reminders and wellness check-ins. Saved locally first for offline reliability, and synchronized automatically with Supabase when online."
+        phase="Phase 5: Reminders, Browser Notifications &amp; Safe Automation"
+        title="Reminders &amp; User-Controlled Routines"
+        description="Schedule reminders, enable browser alerts, and manage user-controlled companion routines. All operations execute strictly on your device without cloud AI."
       />
+
+      {/* Browser Notification Bar */}
+      <div
+        className="card"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px',
+          padding: '12px 16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div
+            className="brand-icon-wrap"
+            style={{
+              width: '34px',
+              height: '34px',
+              backgroundColor: permission === 'granted' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+            }}
+          >
+            {permission === 'granted' ? (
+              <BellRing size={16} style={{ color: 'var(--status-green)' }} />
+            ) : (
+              <Bell size={16} style={{ color: 'var(--status-amber)' }} />
+            )}
+          </div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+              {permission === 'granted'
+                ? 'Browser Notifications Active'
+                : permission === 'denied'
+                ? 'Browser Notifications Blocked'
+                : 'Browser Notifications Not Enabled'}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+              {permission === 'granted'
+                ? 'Desktop chimes and alerts will trigger when scheduled reminders are due.'
+                : permission === 'denied'
+                ? 'Notifications are blocked in your browser. Reminders will show as in-app cards.'
+                : 'Click enable to receive desktop alerts for scheduled check-ins and hydration prompts.'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {permission !== 'granted' && isSupported ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ fontSize: '11px', padding: '5px 12px' }}
+              onClick={handleRequestPermission}
+            >
+              Enable Notifications
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px' }}
+              onClick={testNotification}
+            >
+              Test Alert
+            </button>
+          )}
+        </div>
+      </div>
+
+      {notificationMsg && (
+        <div
+          className="card"
+          style={{
+            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            border: '1px solid var(--accent-primary)',
+            color: 'var(--accent-primary)',
+            fontSize: '12.5px',
+            padding: '8px 12px',
+          }}
+        >
+          {notificationMsg}
+        </div>
+      )}
 
       {error && (
         <div
@@ -405,34 +534,155 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
           </div>
         </div>
 
-        <div className="col-4">
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Companion Routines</h3>
+        <div className="col-4" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Pending Confirmations for Data Modification Actions */}
+          {pendingConfirmations.length > 0 && (
+            <div
+              className="card"
+              style={{
+                border: '1px solid var(--accent-primary)',
+                backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              <div className="card-header" style={{ paddingBottom: '6px' }}>
+                <h3 className="card-title" style={{ fontSize: '13px', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={14} /> Action Confirmation Required
+                </h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {pendingConfirmations.map((conf) => (
+                  <div
+                    key={conf.id}
+                    style={{
+                      fontSize: '12px',
+                      padding: '10px',
+                      backgroundColor: 'var(--bg-card)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <p style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                      {conf.message}
+                    </p>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '11px', padding: '3px 8px' }}
+                        onClick={() => cancelAction(conf.id)}
+                      >
+                        <X size={11} style={{ marginRight: '3px' }} /> Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '11px', padding: '3px 8px' }}
+                        onClick={() => void confirmAction(conf.id)}
+                      >
+                        <Check size={11} style={{ marginRight: '3px' }} /> Confirm Action
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
+          )}
+
+          {/* Interactive Companion Routines */}
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Zap size={16} style={{ color: 'var(--accent-primary)' }} />
+                <h3 className="card-title" style={{ fontSize: '14px' }}>Companion Routines</h3>
+              </div>
+              <button
+                type="button"
+                className={`btn ${autoEnabled ? 'btn-secondary' : 'btn-primary'}`}
+                style={{ fontSize: '10px', padding: '2px 8px' }}
+                onClick={() => setAutoEnabled(!autoEnabled)}
+                title="Toggle all automation routines"
+              >
+                {autoEnabled ? 'Automation: ON' : 'Automation: OFF'}
+              </button>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                <Coffee size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <strong>Hydration Chime</strong>
-                  <p style={{ fontSize: '12px' }}>Triggers every 45 mins during focus mode.</p>
-                </div>
-              </div>
+              {autoRules.map((rule) => {
+                const getRuleIcon = () => {
+                  if (rule.id.includes('hydration')) return <Coffee size={15} style={{ color: 'var(--accent-primary)' }} />;
+                  if (rule.id.includes('posture')) return <Heart size={15} style={{ color: 'var(--status-green)' }} />;
+                  if (rule.id.includes('debrief')) return <CalendarClock size={15} style={{ color: 'var(--status-amber)' }} />;
+                  return <Zap size={15} style={{ color: 'var(--accent-secondary)' }} />;
+                };
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                <Heart size={16} style={{ color: 'var(--status-green)', flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <strong>Posture Sentry</strong>
-                  <p style={{ fontSize: '12px' }}>Visual head tilt cue every 60 mins.</p>
-                </div>
-              </div>
+                return (
+                  <div
+                    key={rule.id}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      padding: '8px 10px',
+                      backgroundColor: rule.enabled && autoEnabled ? 'var(--bg-card-subtle)' : 'transparent',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                      opacity: autoEnabled && rule.enabled ? 1 : 0.6,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                        <div style={{ marginTop: '2px' }}>{getRuleIcon()}</div>
+                        <div>
+                          <strong style={{ fontSize: '12.5px', color: 'var(--text-primary)' }}>{rule.name}</strong>
+                          <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', margin: '2px 0 0 0', lineHeight: 1.3 }}>
+                            {rule.description}
+                          </p>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={() => toggleAutoRule(rule.id)}
+                        disabled={!autoEnabled}
+                        title={rule.enabled ? 'Disable routine' : 'Enable routine'}
+                        style={{ cursor: 'pointer', marginTop: '3px' }}
+                      />
+                    </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                <AlertCircle size={16} style={{ color: 'var(--status-amber)', flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <strong>End of Day Debrief</strong>
-                  <p style={{ fontSize: '12px' }}>Prompt to generate daily productivity report at 7:00 PM.</p>
-                </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                      <span>Runs: {rule.executionCount}</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '10px', padding: '1px 6px' }}
+                        onClick={() => void triggerManual(rule.id)}
+                        disabled={!autoEnabled}
+                        title="Test run routine now"
+                      >
+                        <Play size={9} style={{ marginRight: '2px' }} /> Run Now
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div
+                style={{
+                  marginTop: '8px',
+                  paddingTop: '8px',
+                  borderTop: '1px solid var(--border-subtle)',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <ShieldCheck size={13} style={{ color: 'var(--status-green)', flexShrink: 0 }} />
+                <span>Runs deterministically on device. Zero shell commands.</span>
               </div>
             </div>
           </div>

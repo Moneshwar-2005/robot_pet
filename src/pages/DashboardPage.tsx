@@ -1,5 +1,13 @@
-import React from 'react';
-import type { PetStatus, PetMood, Task, Reminder, WorkSummary, PageId } from '../types';
+import type {
+  PetStatus,
+  PetMood,
+  PetMouthStyle,
+  PetEyeStyle,
+  Task,
+  Reminder,
+  WorkSummary,
+  PageId,
+} from '../types';
 import { GreetingBanner } from '../components/dashboard/GreetingBanner';
 import { PetFacePreview } from '../components/pet/PetFacePreview';
 import { TasksWidget } from '../components/dashboard/TasksWidget';
@@ -10,6 +18,14 @@ interface DashboardPageProps {
   petStatus: PetStatus;
   currentMood: PetMood;
   onMoodChange: (mood: PetMood) => void;
+  eyeShape?: 'curved' | 'round' | 'pixel';
+  glowColor?: 'cyan' | 'emerald' | 'amber' | 'violet';
+  mouthStyle?: PetMouthStyle;
+  eyeStyle?: PetEyeStyle;
+  speechText?: string | null;
+  isSpeaking?: boolean;
+  onSpeechEnd?: () => void;
+  onCancelSpeech?: () => void;
   tasks: Task[];
   tasksLoading?: boolean;
   tasksError?: string | null;
@@ -30,6 +46,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   petStatus,
   currentMood,
   onMoodChange,
+  eyeShape = 'curved',
+  glowColor = 'cyan',
+  mouthStyle,
+  eyeStyle,
+  speechText = null,
+  isSpeaking = false,
+  onSpeechEnd,
+  onCancelSpeech,
   tasks,
   tasksLoading = false,
   tasksError = null,
@@ -83,6 +107,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             petStatus={petStatus}
             currentMood={currentMood}
             onMoodChange={onMoodChange}
+            eyeShape={eyeShape}
+            glowColor={glowColor}
+            mouthStyle={mouthStyle}
+            eyeStyle={eyeStyle}
+            speechText={speechText}
+            isSpeaking={isSpeaking}
+            onSpeechEnd={onSpeechEnd}
+            onCancelSpeech={onCancelSpeech}
             interactive={true}
           />
 

@@ -4,13 +4,15 @@ export const initialPetStatus: PetStatus = {
   name: 'Kuro',
   model: 'Kuro Companion Core (Model-01)',
   avatarVariant: 'Cyan OLED Curved',
-  batteryLevel: 88,
+  hardwareConnected: false, // Physical hardware not connected yet
+  powerSource: 'simulated', // Running as Web Simulator (or USB Power)
+  hasPhysicalBattery: false,
+  batteryLevel: null, // Null when no physical battery sensor exists (prevents fabricated 88% telemetry)
   isCharging: false,
-  hardwareConnected: false, // Phase 1 Software Simulator
   currentMood: 'attentive',
   mode: 'Focus Companion',
   lastSynced: 'Just now (Local virtual cycle)',
-  temperatureCelsius: 24.2,
+  temperatureCelsius: null,
   virtualUptime: '4h 12m',
 };
 
@@ -24,8 +26,8 @@ export const initialTasks: Task[] = [
     dueTime: '5:00 PM',
     estimatedMinutes: 45,
     completed: false,
-    tags: ['Phase 3', 'Hardware', 'Architecture'],
-    description: 'Verify pinout mappings for OLED I2C display and dual servo head articulation.',
+    tags: ['Phase 7', 'Hardware', 'Architecture'],
+    description: 'Verify pinout mappings for 2.4-inch TFT LCD SPI display and rear USB-C power.',
   },
   {
     id: 'task-2',
@@ -53,7 +55,7 @@ export const initialTasks: Task[] = [
   },
   {
     id: 'task-4',
-    title: 'Order test 1.5-inch 128x64 I2C OLED display breakout modules',
+    title: 'Order test 2.4-inch TFT LCD SPI display breakout modules',
     category: 'robot',
     priority: 'low',
     dueDate: 'Oct 26',
@@ -61,7 +63,7 @@ export const initialTasks: Task[] = [
     estimatedMinutes: 15,
     completed: true,
     tags: ['Procurement', 'Hardware'],
-    description: 'Purchased 2 units for display simulation testing.',
+    description: 'Procured 2 units for 2.4-inch visor display simulation testing.',
   },
   {
     id: 'task-5',
@@ -183,8 +185,8 @@ export const sampleIntegrations = [
     id: 'esp32-robot',
     name: 'Kuro Physical Robot (ESP32)',
     category: 'Hardware',
-    status: 'Planned (Phase 3)',
-    description: 'Bi-directional Bluetooth & WiFi protocol for head motor articulation and OLED display control.',
+    status: 'Planned (Phase 7)',
+    description: 'Bi-directional Wi-Fi protocol for 2.4-inch TFT LCD visor display synchronization and visual speech.',
     icon: 'Bot',
     badgeClass: 'badge-warning',
   },

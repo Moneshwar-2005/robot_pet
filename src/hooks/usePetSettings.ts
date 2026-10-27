@@ -4,15 +4,9 @@ import { petSettingsRowToClient, petSettingsToUpdatePayload } from '../lib/adapt
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
 import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
+import { DEFAULT_DOCUMENTED_PET_SETTINGS } from '../lib/pet/faceLifecycle';
 
-export const defaultPetSettings: ClientPetSettings = {
-  petName: 'Kuro',
-  avatarVariant: 'standard',
-  eyeShape: 'curved',
-  glowColor: 'cyan',
-  playfulness: 70,
-  focusDiscipline: 85,
-};
+export const defaultPetSettings: ClientPetSettings = DEFAULT_DOCUMENTED_PET_SETTINGS;
 
 export interface UsePetSettingsReturn {
   petSettings: ClientPetSettings;

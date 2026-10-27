@@ -71,6 +71,13 @@ const TOKEN_FILE_PATH = path.join(__dirname, '.session_token');
 const sessionStartedAt = new Date().toISOString();
 export const sessionToken = crypto.randomBytes(16).toString('hex'); // 32 chars hex
 
+// Active browser tab state reported by companion extension
+let currentBrowserTab = {
+  hostname: null,
+  title: null,
+  timestamp: 0,
+};
+
 // Persist token to companion/.session_token with restricted user-only permissions
 try {
   fs.writeFileSync(TOKEN_FILE_PATH, sessionToken, { mode: 0o600, encoding: 'utf-8' });
@@ -100,16 +107,16 @@ process.on('SIGTERM', () => {
 });
 
 // Helper: Check Origin
-function isOriginAllowed(origin) {
+export function isOriginAllowed(origin) {
   if (!origin) return true; // Direct non-browser requests (e.g. curl or internal tests)
   return ALLOWED_ORIGINS.has(origin);
 }
 
 // Helper: Extract Auth Token from Request
-function extractAuthToken(req) {
+export function extractAuthToken(req) {
   const authHeader = req.headers['authorization'];
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7).trim();
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, '').trim();
   }
   const customHeader = req.headers['x-kuro-companion-token'];
   if (customHeader) {
@@ -119,11 +126,12 @@ function extractAuthToken(req) {
 }
 
 // Helper: Timing-safe token comparison
-function verifyToken(token) {
+export function verifyToken(token, expectedToken = sessionToken) {
   if (!token || typeof token !== 'string') return false;
-  if (token.length !== sessionToken.length) return false;
+  if (!expectedToken || typeof expectedToken !== 'string') return false;
+  if (token.length !== expectedToken.length) return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(sessionToken));
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken));
   } catch {
     return false;
   }
@@ -858,6 +866,58 @@ export const server = http.createServer(async (req, res) => {
 
     const result = activityTracker.clearHistory();
     return sendJson(res, 200, result, origin);
+  }
+
+  // Route 10: Report Active Browser Tab (POST /api/browser/tab)
+  if (req.method === 'POST' && pathname === '/api/browser/tab') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) {
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const hostname = typeof payload.hostname === 'string' ? payload.hostname.slice(0, 100).toLowerCase() : null;
+        const title = typeof payload.title === 'string' ? payload.title.slice(0, 80) : '';
+        if (hostname) {
+          currentBrowserTab = {
+            hostname,
+            title,
+            timestamp: Date.now(),
+          };
+        }
+        return sendJson(res, 200, { status: 'ok', recorded: Boolean(hostname) }, origin);
+      } catch {
+        return sendJson(res, 400, { status: 'error', error: 'Invalid JSON payload' }, origin);
+      }
+    });
+    return;
+  }
+
+  // Route 11: Get Active Browser Tab (GET /api/browser/tab, Requires Token)
+  if (req.method === 'GET' && pathname === '/api/browser/tab') {
+    const token = extractAuthToken(req);
+    if (!verifyToken(token)) {
+      return sendJson(
+        res,
+        401,
+        { status: 'error', error: 'Unauthorized: Valid companion token required.' },
+        origin
+      );
+    }
+    const isRecent = Date.now() - currentBrowserTab.timestamp < 60000;
+    return sendJson(
+      res,
+      200,
+      {
+        status: 'ok',
+        tab: isRecent ? currentBrowserTab : null,
+      },
+      origin
+    );
   }
 
   // Fallback 404

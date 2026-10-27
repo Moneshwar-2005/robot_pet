@@ -29,6 +29,15 @@ export default defineConfig({
           if (id.includes('@mlc-ai/web-llm')) {
             return 'webllm-vendor';
           }
+          if (id.includes('@supabase')) {
+            return 'supabase-vendor';
+          }
+          if (id.includes('lucide-react')) {
+            return 'lucide-vendor';
+          }
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react-vendor';
+          }
         },
       },
     },

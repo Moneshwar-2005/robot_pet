@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node test/daily_summary.test.mjs && node test/notifications_automation.test.mjs && node companion/test_companion.mjs && node test/pet_face_animation.test.mjs && node test/autonomous_pet.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

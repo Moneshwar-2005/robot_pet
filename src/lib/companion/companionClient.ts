@@ -314,3 +314,35 @@ export async function clearCompanionTrackingSessions(
     message: data.message || 'Activity session history cleared.',
   };
 }
+
+export interface CompanionBrowserTabResponse {
+  status: string;
+  tab: {
+    hostname: string;
+    title: string;
+    timestamp: number;
+  } | null;
+}
+
+/**
+ * Fetches the active browser tab reported to the companion service.
+ */
+export async function getCompanionBrowserTab(
+  token: string,
+  baseUrl = COMPANION_DEFAULT_URL
+): Promise<CompanionBrowserTabResponse> {
+  const res = await fetch(`${baseUrl}/api/browser/tab`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+    signal: createTimeoutSignal(),
+  });
+
+  if (!res.ok) {
+    return { status: 'error', tab: null };
+  }
+
+  return (await res.json()) as CompanionBrowserTabResponse;
+}

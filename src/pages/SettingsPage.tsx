@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import type { Theme } from '../types';
-import type { UserProfile } from '../lib/adapters';
+import type { Theme, Task, Reminder } from '../types';
+import type { UserProfile, ClientWorkSession, ClientPetSettings } from '../lib/adapters';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
 import {
   Settings,
@@ -42,6 +42,10 @@ interface SettingsPageProps {
   profileError?: string | null;
   onUpdateFullName?: (newFullName: string) => Promise<boolean>;
   onRetryProfile?: () => void;
+  tasks?: Task[];
+  reminders?: Reminder[];
+  petSettings?: ClientPetSettings;
+  sessions?: ClientWorkSession[];
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -55,6 +59,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   profileError = null,
   onUpdateFullName,
   onRetryProfile,
+  tasks = [],
+  reminders = [],
+  petSettings,
+  sessions = [],
 }) => {
   const { user, signOut, isConfigured } = useAuth();
   const { isOnline } = useNetworkStatus();
@@ -78,15 +86,55 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   };
 
   const handleExportJSON = () => {
+    const exportPayload = {
+      project: 'Kuro Smart Robot Pet + Personal Assistant',
+      exportedAt: new Date().toISOString(),
+      account: {
+        userId: user?.id || 'demo-user',
+        email: user?.email || 'local-demo@kuro.internal',
+        fullName: profile?.fullName || null,
+        authenticated: Boolean(user),
+      },
+      petSettings: petSettings || {
+        petName: 'Kuro',
+        avatarVariant: 'standard',
+        eyeShape: 'curved',
+        glowColor: 'cyan',
+        playfulness: 70,
+        focusDiscipline: 85,
+      },
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        category: t.category,
+        priority: t.priority,
+        dueDate: t.dueDate,
+        dueTime: t.dueTime,
+        estimatedMinutes: t.estimatedMinutes,
+        completed: t.completed,
+        tags: t.tags,
+      })),
+      reminders: reminders.map((r) => ({
+        id: r.id,
+        title: r.title,
+        time: r.time,
+        type: r.type,
+        priority: r.priority,
+        done: r.done,
+      })),
+      workSessions: sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        sessionType: s.sessionType,
+        durationMinutes: s.durationMinutes,
+        startedAt: s.startedAt,
+        completedAt: s.completedAt,
+      })),
+    };
+
     const dataStr =
       'data:text/json;charset=utf-8,' +
-      encodeURIComponent(
-        JSON.stringify(
-          { project: 'Smart Pet Assistant', phase: 2, exportedAt: new Date().toISOString() },
-          null,
-          2
-        )
-      );
+      encodeURIComponent(JSON.stringify(exportPayload, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', 'kuro_assistant_state.json');

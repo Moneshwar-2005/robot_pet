@@ -30,7 +30,7 @@ export const initialWorkSessions: ClientWorkSession[] = [
   },
   {
     id: 'mock-sess-3',
-    title: 'CSS Theme & OLED Styling',
+    title: 'CSS Theme & Visor Styling',
     sessionType: 'focus',
     durationMinutes: 35,
     startedAt: new Date(Date.now() - 1 * 3600000).toISOString(),

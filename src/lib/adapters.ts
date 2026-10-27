@@ -175,6 +175,11 @@ export interface ClientPetSettings {
   glowColor: 'cyan' | 'emerald' | 'amber' | 'violet';
   playfulness: number;
   focusDiscipline: number;
+  autonomousEnabled?: boolean;
+  reactionFrequency?: 'quiet' | 'balanced' | 'expressive';
+  browserAwarenessEnabled?: boolean;
+  excludedDomains?: string[];
+  pausedUntil?: number | null;
 }
 
 /**

@@ -149,7 +149,7 @@ export const RemindersWidget: React.FC<RemindersWidgetProps> = ({
       </div>
 
       <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
-        <span>Hardware audio chimes simulated</span>
+        <span>Visual screen alerts only (no speaker)</span>
         <span className="mono">Push Engine: Phase 2</span>
       </div>
     </div>

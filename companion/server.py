@@ -488,7 +488,7 @@ class CompanionHandler(http.server.BaseHTTPRequestHandler):
 
     def extract_token(self):
         auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
+        if auth and auth.lower().startswith("bearer "):
             return auth[7:].strip()
         custom = self.headers.get("X-Kuro-Companion-Token", "")
         if custom:
