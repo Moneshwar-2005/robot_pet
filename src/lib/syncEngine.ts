@@ -110,14 +110,14 @@ function isPermanentError(error: { code?: string; message?: string } | null | un
  * Executes a single outbox operation against Supabase.
  * Returns true if successful or idempotently satisfied; false if recoverable network error.
  */
-async function executeOperation(op: OutboxOperation): Promise<{ success: boolean; permanentError?: string }> {
+async function executeOperation(op: OutboxOperation): Promise<{ success: boolean; permanentError?: string; aborted?: boolean }> {
   if (!supabase) {
     return { success: false, permanentError: 'Supabase client not configured' };
   }
 
   // Double check that active authenticated user still matches the operation owner
   if (activeUserId !== op.scope) {
-    return { success: false, permanentError: 'Account context switched during sync' };
+    return { success: false, aborted: true };
   }
 
   try {
@@ -225,6 +225,11 @@ export async function processOutbox(userId: string): Promise<void> {
   if (!userId || isSyncing) return;
   if (!supabase) return;
 
+  // Synchronize activeUserId if needed
+  if (!activeUserId && userId) {
+    activeUserId = userId;
+  }
+
   isSyncing = true;
   lastError = null;
   let currentCount = await getPendingOutboxCount(userId);
@@ -236,11 +241,15 @@ export async function processOutbox(userId: string): Promise<void> {
 
     for (const op of pendingOps) {
       // Abort immediately if user switched or logged out
-      if (activeUserId !== userId) {
+      if (activeUserId !== userId || activeUserId !== op.scope) {
         break;
       }
 
       const result = await executeOperation(op);
+
+      if (result.aborted) {
+        break;
+      }
 
       if (result.success) {
         await deleteOutboxOperation(op.id);

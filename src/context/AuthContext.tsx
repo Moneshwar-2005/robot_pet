@@ -1,5 +1,7 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { setActiveSyncUser } from '../lib/syncEngine';
+import { clearScopeCache } from '../lib/offlineDb';
 import { AuthContext } from './authContextDef';
 import type { User, Session } from '@supabase/supabase-js';
 import type { AuthContextType } from './authContextDef';
@@ -28,9 +30,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (error) {
           setSession(null);
           setUser(null);
+          setActiveSyncUser(null);
         } else {
           setSession(initialSession);
           setUser(initialSession?.user ?? null);
+          setActiveSyncUser(initialSession?.user?.id ?? null);
         }
         setLoading(false);
       })
@@ -38,6 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted || currentSequence !== activeSequenceRef.current) return;
         setSession(null);
         setUser(null);
+        setActiveSyncUser(null);
         setLoading(false);
       });
 
@@ -48,7 +53,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
       activeSequenceRef.current++;
       setSession(newSession);
-      setUser(newSession?.user ?? null);
+      const newUser = newSession?.user ?? null;
+      setUser(newUser);
+      setActiveSyncUser(newUser?.id ?? null);
       setLoading(false);
     });
 
@@ -58,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     if (!isClientConfigured || !supabase) {
       return { error: new Error('Supabase client is not configured.') };
     }
@@ -73,9 +80,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error: err instanceof Error ? err : new Error('An unexpected error occurred during sign in.'),
       };
     }
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string) => {
     if (!isClientConfigured || !supabase) {
       return {
         error: new Error('Supabase client is not configured.'),
@@ -102,23 +109,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         emailConfirmationRequired: false,
       };
     }
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
+    const currentUserId = user?.id;
+    setActiveSyncUser(null);
     if (!isClientConfigured || !supabase) {
+      if (currentUserId) {
+        void clearScopeCache(currentUserId);
+      }
       setSession(null);
       setUser(null);
       return { error: null };
     }
     try {
       const { error } = await supabase.auth.signOut();
+      if (currentUserId) {
+        await clearScopeCache(currentUserId);
+      }
       return { error };
     } catch (err) {
       return {
         error: err instanceof Error ? err : new Error('An unexpected error occurred during sign out.'),
       };
     }
-  };
+  }, [user?.id]);
 
   const contextValue = useMemo<AuthContextType>(
     () => ({
@@ -130,7 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signUp,
       signOut,
     }),
-    [user, session, loading]
+    [user, session, loading, signIn, signUp, signOut]
   );
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;

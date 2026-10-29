@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { PetMood, PetStatus, PetMouthStyle, PetEyeStyle } from '../../types';
 import { type EyeShape, type GlowColor, ALL_PET_MOODS } from '../../lib/pet/faceLifecycle';
-import { KuroAnimatedFace } from './KuroAnimatedFace';
+import { KuroAnimatedFace, type DanceStyle, type DanceIntensity } from './KuroAnimatedFace';
 import { Sparkles, Battery, Cpu, Activity, Square, Play, Zap } from 'lucide-react';
 
 export interface PetFacePreviewProps {
@@ -19,6 +19,9 @@ export interface PetFacePreviewProps {
   onCancelSpeech?: () => void;
   showSpeechControls?: boolean;
   onTriggerSpeechPreview?: (text: string) => void;
+  isDancing?: boolean;
+  danceStyle?: DanceStyle;
+  danceIntensity?: DanceIntensity;
 }
 
 export const PetFacePreview: React.FC<PetFacePreviewProps> = ({
@@ -36,6 +39,9 @@ export const PetFacePreview: React.FC<PetFacePreviewProps> = ({
   onCancelSpeech,
   showSpeechControls = false,
   onTriggerSpeechPreview,
+  isDancing = false,
+  danceStyle = 'sway',
+  danceIntensity = 'normal',
 }) => {
   const [localSpeechInput, setLocalSpeechInput] = useState('');
   const [activeSpeech, setActiveSpeech] = useState<string | null>(speechText);
@@ -127,6 +133,9 @@ export const PetFacePreview: React.FC<PetFacePreviewProps> = ({
           onSpeechEnd={handleLocalSpeechEnd}
           onCancelSpeech={handleStopSpeech}
           size="md"
+          isDancing={isDancing}
+          danceStyle={danceStyle}
+          danceIntensity={danceIntensity}
         />
 
         {/* Status Mode Badge */}
@@ -233,7 +242,7 @@ export const PetFacePreview: React.FC<PetFacePreviewProps> = ({
         </form>
       )}
 
-      {/* Interactive Expression State Picker (All 10 Moods) */}
+      {/* Interactive Expression State Picker (All 17 Moods) */}
       {interactive && onMoodChange && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

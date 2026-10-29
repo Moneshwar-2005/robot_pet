@@ -4,7 +4,7 @@
  * Never calls cloud AI providers or exposes secrets.
  */
 
-import { getOllamaEnv } from './env';
+import { getOllamaEnv } from './env.ts';
 
 export type OllamaRole = 'system' | 'user' | 'assistant';
 
@@ -133,16 +133,59 @@ export async function checkOllamaConnection(
     cleanup();
 
     if (!res.ok) {
+      let errorBody = '';
+      try {
+        const json = (await res.json()) as { error?: string } | undefined;
+        errorBody = typeof json?.error === 'string' ? json.error : JSON.stringify(json);
+      } catch {
+        errorBody = res.statusText || '';
+      }
+
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        return {
+          ok: false,
+          state: 'unavailable',
+          models: [],
+          error: `Ollama daemon is offline or unreachable on ${baseUrl} (${res.status} Bad Gateway).`,
+          recoveryGuidance:
+            '1. Start the Ollama daemon with `ollama serve` in your terminal or launch the Ollama desktop app.\n' +
+            '2. Verify Ollama is listening on http://127.0.0.1:11434.\n' +
+            '3. Run `ollama run qwen2.5:3b` to pull a lightweight model.\n' +
+            '4. Click "Retry" or switch to On-Device WebLLM / Cloud AI.',
+        };
+      }
+
+      if (res.status === 404) {
+        return {
+          ok: false,
+          state: 'error',
+          models: [],
+          error: `Ollama tags endpoint not found (404) at ${endpoint}.`,
+          recoveryGuidance: 'Verify that the target URL is an active Ollama instance.',
+        };
+      }
+
       return {
         ok: false,
         state: 'error',
         models: [],
-        error: `Ollama returned HTTP status ${res.status} (${res.statusText})`,
+        error: `Ollama returned HTTP status ${res.status} (${res.statusText}): ${errorBody}`.trim(),
         recoveryGuidance: 'Check the Ollama service status or restart Ollama.',
       };
     }
 
-    const data = await res.json();
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      return {
+        ok: false,
+        state: 'error',
+        models: [],
+        error: 'Malformed response received from Ollama API: invalid JSON format.',
+        recoveryGuidance: 'Ensure the endpoint is a genuine Ollama server listening on port 11434.',
+      };
+    }
     const rawModels: unknown[] = Array.isArray(data?.models) ? data.models : [];
 
     const models: OllamaModel[] = rawModels
@@ -274,6 +317,14 @@ export async function sendOllamaChat(params: {
         errorBody = typeof json?.error === 'string' ? json.error : JSON.stringify(json);
       } catch {
         errorBody = res.statusText;
+      }
+
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        throw new OllamaClientError(
+          `Ollama daemon is offline or unreachable (${res.status} ${res.statusText}).`,
+          'unavailable',
+          'Start Ollama with `ollama serve` in your terminal or switch to On-Device WebLLM / Cloud AI.'
+        );
       }
 
       if (res.status === 404) {
@@ -433,6 +484,14 @@ export async function sendOllamaChatStream(params: OllamaChatStreamParams): Prom
         errorBody = typeof json?.error === 'string' ? json.error : JSON.stringify(json);
       } catch {
         errorBody = res.statusText;
+      }
+
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        throw new OllamaClientError(
+          `Ollama daemon is offline or unreachable (${res.status} ${res.statusText}).`,
+          'unavailable',
+          'Start Ollama with `ollama serve` in your terminal or switch to On-Device WebLLM / Cloud AI.'
+        );
       }
 
       if (res.status === 404) {

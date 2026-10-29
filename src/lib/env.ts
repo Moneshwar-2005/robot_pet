@@ -54,8 +54,12 @@ export interface OllamaEnvResult {
 }
 
 export function getOllamaEnv(): OllamaEnvResult {
-  const rawUrl = import.meta.env.VITE_OLLAMA_BASE_URL?.trim();
-  const defaultUrl = 'http://localhost:11434';
+  const isBrowser = typeof window !== 'undefined';
+  const defaultUrl = isBrowser
+    ? '/api/ollama'
+    : ((typeof process !== 'undefined' && (process.env?.OLLAMA_BASE_URL || process.env?.OLLAMA_HOST)) || 'http://127.0.0.1:11434');
+
+  const rawUrl = typeof import.meta !== 'undefined' && import.meta.env?.VITE_OLLAMA_BASE_URL?.trim();
 
   if (!rawUrl) {
     return { baseUrl: defaultUrl, isCustom: false, error: null };

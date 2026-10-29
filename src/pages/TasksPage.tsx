@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Loader2,
   Trash2,
+  Pencil,
 } from 'lucide-react';
 
 interface TasksPageProps {
@@ -21,6 +22,7 @@ interface TasksPageProps {
   error?: string | null;
   onToggleTask: (taskId: string) => void;
   onAddTask: (newTask: Omit<Task, 'id'>) => void;
+  onEditTask?: (taskId: string, updates: Partial<Omit<Task, 'id'>>) => Promise<void> | void;
   onDeleteTask?: (taskId: string) => void;
   onRetry?: () => void;
 }
@@ -31,6 +33,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
   error = null,
   onToggleTask,
   onAddTask,
+  onEditTask,
   onDeleteTask,
   onRetry,
 }) => {
@@ -42,6 +45,17 @@ export const TasksPage: React.FC<TasksPageProps> = ({
   const [newEstimate, setNewEstimate] = useState(30);
   const [newDueDate, setNewDueDate] = useState(() => formatLocalDateString());
   const [newDueTime, setNewDueTime] = useState('18:00');
+
+  // Edit Task State
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editCategory, setEditCategory] = useState<TaskCategory>('robot');
+  const [editPriority, setEditPriority] = useState<TaskPriority>('medium');
+  const [editEstimate, setEditEstimate] = useState(30);
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editDueTime, setEditDueTime] = useState('');
+  const [editDescription, setEditDescription] = useState('');
 
   const filteredTasks = tasks.filter((t) => {
     if (selectedCategory === 'all') return true;
@@ -65,6 +79,36 @@ export const TasksPage: React.FC<TasksPageProps> = ({
 
     setNewTitle('');
     setShowModal(false);
+  };
+
+  const handleStartEdit = (task: Task) => {
+    setEditingTask(task);
+    setEditTitle(task.title);
+    setEditCategory(task.category);
+    setEditPriority(task.priority);
+    setEditEstimate(task.estimatedMinutes);
+    setEditDueDate(task.dueDate || '');
+    setEditDueTime(task.dueTime ? task.dueTime.slice(0, 5) : '');
+    setEditDescription(task.description || '');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTask || !editTitle.trim()) return;
+
+    if (onEditTask) {
+      void onEditTask(editingTask.id, {
+        title: editTitle.trim(),
+        category: editCategory,
+        priority: editPriority,
+        estimatedMinutes: editEstimate,
+        dueDate: editDueDate || null,
+        dueTime: editDueTime ? `${editDueTime}:00` : null,
+        description: editDescription.trim() || undefined,
+      });
+    }
+
+    setEditingTask(null);
   };
 
   const getPriorityBadge = (priority: TaskPriority) => {
@@ -369,6 +413,149 @@ export const TasksPage: React.FC<TasksPageProps> = ({
         </div>
       )}
 
+      {/* Task Edit Modal */}
+      {editingTask && (
+        <div className="card" style={{ border: '1px solid var(--accent-primary)', backgroundColor: 'var(--bg-card-hover)' }}>
+          <div className="card-header">
+            <h3 className="card-title">Edit Task</h3>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '4px 8px', fontSize: '11px' }}
+              onClick={() => setEditingTask(null)}
+            >
+              Close
+            </button>
+          </div>
+          <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <input
+              type="text"
+              placeholder="Task title..."
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              autoFocus
+              style={{
+                padding: '10px 14px',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+              }}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Category
+                </label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value as TaskCategory)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)' }}
+                >
+                  <option value="robot">Robot Companion</option>
+                  <option value="work">Work Project</option>
+                  <option value="learning">Learning &amp; Growth</option>
+                  <option value="personal">Personal Routine</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Priority
+                </label>
+                <select
+                  value={editPriority}
+                  onChange={(e) => setEditPriority(e.target.value as TaskPriority)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)' }}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Estimate (mins)
+                </label>
+                <input
+                  type="number"
+                  min="5"
+                  step="5"
+                  value={editEstimate}
+                  onChange={(e) => setEditEstimate(Number(e.target.value))}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Due Date
+                </label>
+                <input
+                  type="date"
+                  value={editDueDate}
+                  onChange={(e) => setEditDueDate(e.target.value)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Due Time
+                </label>
+                <input
+                  type="time"
+                  value={editDueTime}
+                  onChange={(e) => setEditDueTime(e.target.value)}
+                  style={{ width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                Description / Notes
+              </label>
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Optional task details..."
+                rows={2}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--text-primary)',
+                  fontSize: '12.5px',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditingTask(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!editTitle.trim()}
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Task List */}
       <div className="card">
         <div className="card-header">
@@ -431,22 +618,114 @@ export const TasksPage: React.FC<TasksPageProps> = ({
                   </div>
                 </div>
 
-                {onDeleteTask && (
-                  <button
-                    type="button"
-                    className="reminder-action-btn"
-                    onClick={() => onDeleteTask(task.id)}
-                    title="Delete task"
-                    style={{ color: 'var(--status-red)', alignSelf: 'center', marginLeft: '8px' }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', alignSelf: 'center', marginLeft: '8px' }}>
+                  {onEditTask && (
+                    <button
+                      type="button"
+                      className="reminder-action-btn"
+                      onClick={() => handleStartEdit(task)}
+                      title="Edit task"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  )}
+                  {onDeleteTask && (
+                    <button
+                      type="button"
+                      className="reminder-action-btn"
+                      onClick={() => setTaskToDelete(task)}
+                      title="Delete task"
+                      style={{ color: 'var(--status-red)' }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
         </div>
       </div>
+
+      {/* Delete Task Confirmation Modal */}
+      {taskToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '16px',
+          }}
+          onClick={() => setTaskToDelete(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '24px',
+              maxWidth: '420px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                marginBottom: '12px',
+                color: 'var(--status-red)',
+              }}
+            >
+              <AlertCircle size={20} />
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Delete Task?</h4>
+            </div>
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                marginBottom: '16px',
+                lineHeight: 1.5,
+              }}
+            >
+              Are you sure you want to delete{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>"{taskToDelete.title}"</strong>? This action cannot be
+              undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setTaskToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{ backgroundColor: 'var(--status-red)', color: '#fff' }}
+                onClick={() => {
+                  if (onDeleteTask) onDeleteTask(taskToDelete.id);
+                  setTaskToDelete(null);
+                }}
+              >
+                Delete Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

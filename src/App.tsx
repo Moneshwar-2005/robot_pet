@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { PageId, Theme, PetMood, PetStatus } from './types';
+import type { PetFocusState } from './lib/pet/autonomousEngine';
 import { initialPetStatus } from './data/mockData';
 import { AppLayout } from './components/layout/AppLayout';
 import { AuthProvider } from './context/AuthContext';
@@ -17,6 +18,7 @@ import { useDesktopCompanion } from './hooks/useDesktopCompanion';
 import { BellRing, X, Check } from 'lucide-react';
 import { DashboardPage } from './pages/DashboardPage';
 import { PetStudioPage } from './pages/PetStudioPage';
+import { ActivitiesPage } from './pages/ActivitiesPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { TasksPage } from './pages/TasksPage';
 import { RemindersPage } from './pages/RemindersPage';
@@ -32,6 +34,7 @@ function AppContent() {
   const [theme, setTheme] = useState<Theme>('dark');
   const [currentMood, setCurrentMood] = useState<PetMood>('attentive');
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [activeFocusSession, setActiveFocusSession] = useState<PetFocusState | null>(null);
 
   const {
     profile,
@@ -47,6 +50,7 @@ function AppContent() {
     loading: tasksLoading,
     error: tasksError,
     addTask,
+    editTask,
     toggleTask,
     deleteTask,
     retry: retryTasks,
@@ -59,6 +63,7 @@ function AppContent() {
     error: remindersError,
     addReminder,
     toggleReminder,
+    snoozeReminder,
     deleteReminder,
     retry: retryReminders,
     resetDemoData: resetRemindersDemoData,
@@ -119,7 +124,7 @@ function AppContent() {
     reminders,
     petSettings,
     updatePetSettings,
-    focusSession: null,
+    focusSession: activeFocusSession,
     companionState:
       companionConnectionState === 'running_paired'
         ? {
@@ -229,6 +234,19 @@ function AppContent() {
             isAutonomousPaused={autonomousPet.isPaused}
             onPauseAutonomy={autonomousPet.pauseAutonomy}
             onResumeAutonomy={autonomousPet.resumeAutonomy}
+            autonomousCooldownMs={autonomousPet.cooldownMs}
+            autonomousNextEligibleSpeechTimestamp={autonomousPet.nextEligibleSpeechTimestamp}
+            autonomousLastRule={autonomousPet.lastRuleTriggered}
+          />
+        );
+      case 'activities':
+        return (
+          <ActivitiesPage
+            petStatus={activePetStatus}
+            currentMood={autonomousPet.currentMood}
+            onMoodChange={handleMoodChange}
+            petSettings={petSettings}
+            onUpdatePetSettings={updatePetSettings}
           />
         );
       case 'assistant':
@@ -247,6 +265,7 @@ function AppContent() {
             error={tasksError}
             onToggleTask={toggleTask}
             onAddTask={addTask}
+            onEditTask={editTask}
             onDeleteTask={deleteTask}
             onRetry={retryTasks}
           />
@@ -277,6 +296,7 @@ function AppContent() {
             onDeleteSession={deleteSession}
             onRetry={retrySessions}
             tasks={tasks}
+            onFocusStateChange={setActiveFocusSession}
           />
         );
       case 'daily-reports':
@@ -424,7 +444,11 @@ function AppContent() {
                   type="button"
                   className="btn btn-secondary"
                   style={{ fontSize: '11px', padding: '3px 8px' }}
-                  onClick={() => dismissReminderAlert(alert.id)}
+                  onClick={() => {
+                    dismissReminderAlert(alert.id);
+                    void snoozeReminder(alert.reminderId, 5);
+                  }}
+                  title="Snooze reminder for 5 minutes"
                 >
                   Snooze
                 </button>

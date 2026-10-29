@@ -55,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Network Offline / Reconnection Pill */}
         {!isOnline ? (
           <div
-            className="header-pet-pill"
+            className="header-status-pill"
             style={{
               backgroundColor: 'rgba(234, 179, 8, 0.12)',
               borderColor: 'rgba(234, 179, 8, 0.4)',
@@ -69,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         ) : wasOffline ? (
           <div
-            className="header-pet-pill"
+            className="header-status-pill"
             style={{
               backgroundColor: 'rgba(34, 197, 94, 0.12)',
               borderColor: 'rgba(34, 197, 94, 0.4)',
@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Outbox Synchronization Status Pill */}
         {user && isSyncing ? (
           <div
-            className="header-pet-pill"
+            className="header-status-pill"
             style={{
               backgroundColor: 'rgba(56, 189, 248, 0.12)',
               borderColor: 'rgba(56, 189, 248, 0.4)',
@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         ) : user && pendingCount > 0 ? (
           <div
-            className="header-pet-pill"
+            className="header-status-pill"
             style={{
               backgroundColor: 'rgba(234, 179, 8, 0.12)',
               borderColor: 'rgba(234, 179, 8, 0.4)',

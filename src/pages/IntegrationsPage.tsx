@@ -26,6 +26,8 @@ import {
   Info,
   ChevronRight,
   ShieldCheck,
+  Sparkles,
+  Cloud,
 } from 'lucide-react';
 
 export interface IntegrationsPageProps {
@@ -510,7 +512,79 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
           </div>
         </div>
 
-        {/* 8. Spotify (Planned / Media) */}
+        {/* 8. YouTube Music & Visual Dance Party (Phase 7.5) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div className="brand-icon-wrap" style={{ width: '42px', height: '42px', backgroundColor: 'rgba(236, 72, 153, 0.12)' }}>
+                <Music size={22} style={{ color: 'var(--accent-secondary)' }} />
+              </div>
+              {renderBadge('connected', 'Connected (Ready to Play)')}
+            </div>
+
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              YouTube Music &amp; Visual Dance
+            </h3>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
+              Interactive Music Reactive Companion
+            </span>
+            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Stream focus and study tracks (Lofi Girl, Synthwave, Coffee Ambience) while Kuro reacts with real-time visual dance animations on screen. Screen-only animation, no physical servos or speakers required.
+            </p>
+          </div>
+
+          <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>4 Presets + Custom URL</span>
+            {onNavigate && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                onClick={() => onNavigate('activities')}
+              >
+                <Sparkles size={12} /> Open Dance Party
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 9. Optional Cloud AI Gateway (Gemini / OpenAI) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div className="brand-icon-wrap" style={{ width: '42px', height: '42px', backgroundColor: 'rgba(59, 130, 246, 0.12)' }}>
+                <Cloud size={22} style={{ color: 'var(--accent-primary)' }} />
+              </div>
+              {renderBadge('configured', 'Configured (Opt-in Provider)')}
+            </div>
+
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              Optional Cloud AI Gateway
+            </h3>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
+              Google Gemini &amp; OpenAI API
+            </span>
+            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Opt-in cloud intelligence gateway for systems without local GPU compute. Requires explicit privacy consent and your own API key.
+            </p>
+          </div>
+
+          <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Gemini 1.5 &amp; GPT-4o</span>
+            {onNavigate && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                onClick={() => onNavigate('assistant')}
+              >
+                Configure Cloud AI <ChevronRight size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 10. Spotify (Planned / Media) */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', opacity: 0.85 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>

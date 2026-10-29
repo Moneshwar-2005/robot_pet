@@ -408,7 +408,8 @@ p {
   gap: 12px;
 }
 
-.header-pet-pill {
+.header-pet-pill,
+.header-status-pill {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -966,6 +967,116 @@ p {
   }
 }
 
+/* ==========================================================================
+   Phase 7.5: Visual Dance Party & Playful Motion Animations
+   (Screen-only robot companion: no physical servos, motors, or audio speaker)
+   ========================================================================== */
+
+.kuro-visor-screen.is-dancing {
+  transform-origin: center center;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Dance Style 1: Groove Sway (Side to side tilt) */
+.kuro-visor-screen.is-dancing.dance-style-sway {
+  animation: kuroDanceSway 1.8s infinite ease-in-out;
+}
+.kuro-visor-screen.is-dancing.dance-style-sway.dance-intensity-subtle {
+  animation-duration: 2.4s;
+}
+.kuro-visor-screen.is-dancing.dance-style-sway.dance-intensity-energetic {
+  animation-duration: 1.2s;
+}
+
+/* Dance Style 2: Robot Bounce (Up-down rhythmic bounce & squash) */
+.kuro-visor-screen.is-dancing.dance-style-bounce {
+  animation: kuroDanceBounce 1.1s infinite cubic-bezier(0.28, 0.84, 0.42, 1);
+}
+.kuro-visor-screen.is-dancing.dance-style-bounce.dance-intensity-subtle {
+  animation-duration: 1.6s;
+}
+.kuro-visor-screen.is-dancing.dance-style-bounce.dance-intensity-energetic {
+  animation-duration: 0.8s;
+}
+
+/* Dance Style 3: Disco Pulse (Hue rotation & eye pop) */
+.kuro-visor-screen.is-dancing.dance-style-disco {
+  animation: kuroDanceDisco 1.6s infinite ease-in-out;
+}
+.kuro-visor-screen.is-dancing.dance-style-disco.dance-intensity-subtle {
+  animation-duration: 2.2s;
+}
+.kuro-visor-screen.is-dancing.dance-style-disco.dance-intensity-energetic {
+  animation-duration: 1.0s;
+}
+
+/* Dance Style 4: Head Bob (Upbeat nodding rhythm) */
+.kuro-visor-screen.is-dancing.dance-style-headbob {
+  animation: kuroDanceHeadbob 0.85s infinite ease-in-out;
+}
+.kuro-visor-screen.is-dancing.dance-style-headbob.dance-intensity-subtle {
+  animation-duration: 1.2s;
+}
+.kuro-visor-screen.is-dancing.dance-style-headbob.dance-intensity-energetic {
+  animation-duration: 0.6s;
+}
+
+/* Dance Keyframes */
+@keyframes kuroDanceSway {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  25% {
+    transform: translateX(-10px) rotate(-3.5deg);
+  }
+  75% {
+    transform: translateX(10px) rotate(3.5deg);
+  }
+}
+
+@keyframes kuroDanceBounce {
+  0%, 100% {
+    transform: translateY(0) scaleY(1) scaleX(1);
+  }
+  30% {
+    transform: translateY(-14px) scaleY(1.08) scaleX(0.96);
+  }
+  70% {
+    transform: translateY(2px) scaleY(0.94) scaleX(1.04);
+  }
+}
+
+@keyframes kuroDanceDisco {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 10px var(--kuro-glow-shadow, rgba(6, 182, 212, 0.65)));
+  }
+  25% {
+    transform: scale(1.04) rotate(-2deg);
+    filter: drop-shadow(0 0 18px rgba(168, 85, 247, 0.75)) hue-rotate(45deg);
+  }
+  50% {
+    transform: scale(0.97) rotate(0deg);
+    filter: drop-shadow(0 0 12px rgba(236, 72, 153, 0.75)) hue-rotate(90deg);
+  }
+  75% {
+    transform: scale(1.04) rotate(2deg);
+    filter: drop-shadow(0 0 18px rgba(59, 130, 246, 0.75)) hue-rotate(180deg);
+  }
+}
+
+@keyframes kuroDanceHeadbob {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  35% {
+    transform: translateY(8px) rotate(1.5deg);
+  }
+  70% {
+    transform: translateY(-5px) rotate(-1deg);
+  }
+}
+
 /* Accessible Reduced Motion Rules */
 @media (prefers-reduced-motion: reduce) {
   .kuro-eye.mood-idle,
@@ -978,8 +1089,10 @@ p {
   .kuro-speaking-path,
   .kuro-speech-indicator,
   .kuro-mouth-svg.listening rect,
-  .kuro-mouth-svg.thinking circle {
+  .kuro-mouth-svg.thinking circle,
+  .kuro-visor-screen.is-dancing {
     animation: none !important;
+    transform: none !important;
   }
 
   .kuro-speaking-path {
@@ -1465,5 +1578,12 @@ p {
 
   .header-pet-pill {
     display: none;
+  }
+
+  .header-status-pill {
+    display: inline-flex;
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 4px;
   }
 }

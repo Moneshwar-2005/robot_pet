@@ -25,6 +25,7 @@ const PRECACHE_ASSETS = [
 // Domains and URL patterns strictly excluded from service worker caching
 const NEVER_CACHE_PATTERNS = [
   /\/api\/ollama/i,
+  /\/api\/cloud/i,
   /:11434/i,
   /supabase\.co/i,
   /\/auth\/v1/i,

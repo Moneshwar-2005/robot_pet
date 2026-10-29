@@ -10,6 +10,9 @@ import {
   getMoodDefaultEyeStyle,
 } from '../../lib/pet/faceLifecycle';
 
+export type DanceStyle = 'sway' | 'bounce' | 'disco' | 'headbob';
+export type DanceIntensity = 'subtle' | 'normal' | 'energetic';
+
 export interface KuroAnimatedFaceProps {
   currentMood: PetMood;
   eyeShape?: EyeShape;
@@ -23,6 +26,9 @@ export interface KuroAnimatedFaceProps {
   size?: 'sm' | 'md' | 'lg';
   showSpeechRibbon?: boolean;
   className?: string;
+  isDancing?: boolean;
+  danceStyle?: DanceStyle;
+  danceIntensity?: DanceIntensity;
 }
 
 export const KuroAnimatedFace: React.FC<KuroAnimatedFaceProps> = ({
@@ -38,6 +44,9 @@ export const KuroAnimatedFace: React.FC<KuroAnimatedFaceProps> = ({
   size = 'md',
   showSpeechRibbon = true,
   className = '',
+  isDancing = false,
+  danceStyle = 'sway',
+  danceIntensity = 'normal',
 }) => {
   // Palette settings
   const palette = GLOW_PALETTES[glowColor] || GLOW_PALETTES.cyan;
@@ -151,7 +160,11 @@ export const KuroAnimatedFace: React.FC<KuroAnimatedFaceProps> = ({
       aria-label={`Kuro robot companion visor face. Mood: ${effectiveMood}, Expression: ${effectiveMouthStyle}${isSpeaking ? `, speaking: "${sanitizedDisplaySpeech}"` : ''}`}
     >
       {/* 2.4-inch TFT Visor Display Screen */}
-      <div className={`kuro-visor-screen palette-${glowColor} shape-${eyeShape} mood-${effectiveMood} mouth-style-${effectiveMouthStyle} eye-style-${effectiveEyeStyle}`}>
+      <div
+        className={`kuro-visor-screen palette-${glowColor} shape-${eyeShape} mood-${effectiveMood} mouth-style-${effectiveMouthStyle} eye-style-${effectiveEyeStyle}${
+          isDancing ? ` is-dancing dance-style-${danceStyle} dance-intensity-${danceIntensity}` : ''
+        }`}
+      >
         {/* Subtle hardware scanlines overlay */}
         <div className="kuro-visor-scanlines" aria-hidden="true" />
 

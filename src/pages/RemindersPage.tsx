@@ -55,6 +55,7 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
   const [type, setType] = useState<Reminder['type']>('wellness');
   const [priority, setPriority] = useState<Reminder['priority']>('normal');
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+  const [reminderToDelete, setReminderToDelete] = useState<Reminder | null>(null);
 
   const { permission, isSupported, requestPermission, testNotification } = useReminderNotifications(
     reminders,
@@ -519,7 +520,7 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
                         <button
                           type="button"
                           className="reminder-action-btn"
-                          onClick={() => onDeleteReminder(r.id)}
+                          onClick={() => setReminderToDelete(r)}
                           title="Delete reminder"
                           style={{ color: 'var(--status-red)' }}
                         >
@@ -688,6 +689,85 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Reminder Confirmation Modal */}
+      {reminderToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '16px',
+          }}
+          onClick={() => setReminderToDelete(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '24px',
+              maxWidth: '420px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                marginBottom: '12px',
+                color: 'var(--status-red)',
+              }}
+            >
+              <AlertCircle size={20} />
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Delete Reminder?</h4>
+            </div>
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                marginBottom: '16px',
+                lineHeight: 1.5,
+              }}
+            >
+              Are you sure you want to delete reminder{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>"{reminderToDelete.title}"</strong>? This action cannot
+              be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setReminderToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{ backgroundColor: 'var(--status-red)', color: '#fff' }}
+                onClick={() => {
+                  if (onDeleteReminder) onDeleteReminder(reminderToDelete.id);
+                  setReminderToDelete(null);
+                }}
+              >
+                Delete Reminder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

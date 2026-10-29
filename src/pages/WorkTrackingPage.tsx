@@ -32,6 +32,13 @@ interface WorkTrackingPageProps {
   onDeleteSession?: (id: string) => Promise<boolean>;
   onRetry?: () => void;
   tasks?: Task[];
+  onFocusStateChange?: (
+    state: {
+      isActive: boolean;
+      mode: 'focus' | 'short_break' | 'long_break';
+      remainingSeconds: number;
+    } | null
+  ) => void;
 }
 
 export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
@@ -42,12 +49,14 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
   onRecordSession,
   onDeleteSession,
   onRetry,
+  onFocusStateChange,
 }) => {
   const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('Deep Work Sprint');
+  const [sessionToDelete, setSessionToDelete] = useState<ClientWorkSession | null>(null);
   const sessionStartTimeRef = useRef<string | null>(null);
   const isRecordingRef = useRef(false);
   const sessionTitleRef = useRef(sessionTitle);
@@ -55,6 +64,20 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
   useEffect(() => {
     sessionTitleRef.current = sessionTitle;
   }, [sessionTitle]);
+
+  useEffect(() => {
+    if (onFocusStateChange) {
+      if (isRunning) {
+        onFocusStateChange({
+          isActive: true,
+          mode: timerMode === 'focus' ? 'focus' : 'short_break',
+          remainingSeconds: secondsLeft,
+        });
+      } else {
+        onFocusStateChange(null);
+      }
+    }
+  }, [isRunning, timerMode, secondsLeft, onFocusStateChange]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -386,7 +409,7 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
                           <button
                             type="button"
                             className="reminder-action-btn"
-                            onClick={() => onDeleteSession(sess.id)}
+                            onClick={() => setSessionToDelete(sess)}
                             title="Delete session log"
                             style={{ color: 'var(--status-red)' }}
                           >
@@ -402,6 +425,84 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Session Confirmation Modal */}
+      {sessionToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '16px',
+          }}
+          onClick={() => setSessionToDelete(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '24px',
+              maxWidth: '420px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                marginBottom: '12px',
+                color: 'var(--status-red)',
+              }}
+            >
+              <AlertCircle size={20} />
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Delete Work Session?</h4>
+            </div>
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                marginBottom: '16px',
+                lineHeight: 1.5,
+              }}
+            >
+              Are you sure you want to delete session log{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>"{sessionToDelete.title}"</strong> ({sessionToDelete.durationMinutes} mins)? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSessionToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{ backgroundColor: 'var(--status-red)', color: '#fff' }}
+                onClick={() => {
+                  if (onDeleteSession) onDeleteSession(sessionToDelete.id);
+                  setSessionToDelete(null);
+                }}
+              >
+                Delete Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

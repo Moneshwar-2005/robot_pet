@@ -30,3 +30,10 @@ dist-ssr
 companion/.session_token
 companion/*.token
 companion/.sessions_history.json*
+
+# Kuro ESP32 Firmware & PlatformIO
+.pio
+.pio/
+firmware/.pio
+firmware/.pio/
+firmware/include/wifi_credentials.h

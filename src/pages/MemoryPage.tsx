@@ -31,6 +31,7 @@ export const MemoryPage: React.FC<MemoryPageProps> = ({
 
   // Editing state for an individual memory
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [memoryToDelete, setMemoryToDelete] = useState<ClientMemory | null>(null);
   const [editFact, setEditFact] = useState('');
   const [editCategory, setEditCategory] = useState('');
 
@@ -346,7 +347,7 @@ export const MemoryPage: React.FC<MemoryPageProps> = ({
                       <button
                         type="button"
                         className="reminder-action-btn"
-                        onClick={() => onDeleteMemory(mem.id)}
+                        onClick={() => setMemoryToDelete(mem)}
                         title="Remove from memory"
                         style={{ color: 'var(--status-red)' }}
                       >
@@ -360,6 +361,85 @@ export const MemoryPage: React.FC<MemoryPageProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Memory Confirmation Modal */}
+      {memoryToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '16px',
+          }}
+          onClick={() => setMemoryToDelete(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '24px',
+              maxWidth: '420px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                marginBottom: '12px',
+                color: 'var(--status-red)',
+              }}
+            >
+              <AlertCircle size={20} />
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Remove Memory?</h4>
+            </div>
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                marginBottom: '16px',
+                lineHeight: 1.5,
+              }}
+            >
+              Are you sure you want to remove this fact from Kuro's memory:{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>"{memoryToDelete.fact}"</strong>? This action cannot be
+              undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setMemoryToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{ backgroundColor: 'var(--status-red)', color: '#fff' }}
+                onClick={async () => {
+                  await onDeleteMemory(memoryToDelete.id);
+                  setMemoryToDelete(null);
+                }}
+              >
+                Remove Fact
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

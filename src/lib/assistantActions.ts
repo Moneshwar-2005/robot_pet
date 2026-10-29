@@ -6,7 +6,7 @@
  */
 
 import type { TaskPriority, TaskCategory } from '../types';
-import { formatLocalDateString } from './formatters';
+import { formatLocalDateString } from './formatters.ts';
 
 export interface TaskProposalPayload {
   title: string;

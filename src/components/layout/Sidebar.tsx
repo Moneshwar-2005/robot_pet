@@ -13,6 +13,7 @@ import {
   Settings,
   X,
   Radio,
+  Sparkles,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems: NavItemConfig[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'primary' },
     { id: 'pet-studio', label: 'Pet Studio', icon: Bot, badge: 'Visor', section: 'primary' },
+    { id: 'activities', label: 'Playful Activities', icon: Sparkles, badge: 'Music & Fun', section: 'primary' },
     { id: 'assistant', label: 'Personal Assistant', icon: MessageSquareText, section: 'primary' },
     { id: 'tasks', label: 'Tasks & Projects', icon: CheckSquare, badge: pendingTasksCount, section: 'productivity' },
     { id: 'reminders', label: 'Reminders & Calendar', icon: CalendarClock, badge: upcomingRemindersCount, section: 'productivity' },

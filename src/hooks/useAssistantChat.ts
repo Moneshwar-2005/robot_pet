@@ -245,6 +245,7 @@ export function useAssistantChat() {
   const [activeConversationId, setActiveConversationId] = useState<string>(initialData.activeId);
 
   const [isLoading, setIsLoading] = useState(false);
+  const isSendingRef = useRef(false);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef<string>(activeConversationId);
   useEffect(() => {
@@ -299,10 +300,26 @@ export function useAssistantChat() {
 
       if (status.state === 'connected' && status.models.length > 0) {
         setSelectedModel((prev) => {
+          let saved: string | null = null;
+          try {
+            if (activeProvider.id === 'hosted_cloud') {
+              saved = localStorage.getItem('kuro_cloud_selected_model');
+            } else if (activeProvider.id === 'on_device_mobile') {
+              saved = localStorage.getItem('kuro_selected_webllm_model');
+            } else {
+              saved = localStorage.getItem('kuro_selected_ollama_model');
+            }
+          } catch {
+            // ignore
+          }
+
           if (prev && status.models.some((m) => m.name === prev || m.id === prev)) {
             return prev;
           }
-          return status.activeModel || status.models[0].name;
+          if (saved && status.models.some((m) => m.name === saved || m.id === saved)) {
+            return saved;
+          }
+          return status.activeModel || status.models[0].name || status.models[0].id;
         });
       } else {
         setSelectedModel(status.activeModel || '');
@@ -338,12 +355,27 @@ export function useAssistantChat() {
         activeAbortControllerRef.current.abort();
         activeAbortControllerRef.current = null;
         setIsLoading(false);
+        isSendingRef.current = false;
       }
 
       // If switching away from WebLLM while initializing, cancel initialization
       if (activeProviderId === 'on_device_mobile' && activeProvider.cancelInitialization && isInitializing) {
         activeProvider.cancelInitialization();
       }
+
+      let savedTargetModel = '';
+      try {
+        if (providerId === 'hosted_cloud') {
+          savedTargetModel = localStorage.getItem('kuro_cloud_selected_model') || '';
+        } else if (providerId === 'on_device_mobile') {
+          savedTargetModel = localStorage.getItem('kuro_selected_webllm_model') || '';
+        } else {
+          savedTargetModel = localStorage.getItem('kuro_selected_ollama_model') || '';
+        }
+      } catch {
+        // ignore
+      }
+      setSelectedModel(savedTargetModel);
 
       setActiveProviderId(providerId);
       saveProviderId(providerId);
@@ -360,6 +392,8 @@ export function useAssistantChat() {
       try {
         if (activeProviderId === 'on_device_mobile') {
           localStorage.setItem('kuro_selected_webllm_model', modelName);
+        } else if (activeProviderId === 'hosted_cloud') {
+          localStorage.setItem('kuro_cloud_selected_model', modelName);
         } else {
           localStorage.setItem('kuro_selected_ollama_model', modelName);
         }
@@ -435,6 +469,7 @@ export function useAssistantChat() {
       activeAbortControllerRef.current.abort();
       activeAbortControllerRef.current = null;
       setIsLoading(false);
+      isSendingRef.current = false;
     }
   }, []);
 
@@ -518,265 +553,290 @@ export function useAssistantChat() {
   const sendMessage = useCallback(
     async (text: string) => {
       const cleanText = text.trim();
-      if (!cleanText || isLoading) return;
+      if (!cleanText || isLoading || isSendingRef.current) return;
+      isSendingRef.current = true;
 
       const targetConvId = activeConversationIdRef.current;
 
-      if (!activeProvider.isImplemented) {
-        const errMsg: UIChatMessage = {
-          id: `msg-${Date.now()}-err`,
-          sender: 'assistant',
-          text: `Provider "${activeProvider.name}" is not implemented in this build.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'error',
-          errorMsg: 'Selected provider is scheduled for a future step.',
-          recoveryGuidance: 'Please switch back to Local Ollama (PC) in the provider selector.',
-        };
-
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === targetConvId
-              ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
-              : conv
-          )
-        );
-        return;
-      }
-
-      // Check if on-device model needs initialization first
-      if (activeProvider.id === 'on_device_mobile' && !activeProvider.isModelLoaded) {
-        const errMsg: UIChatMessage = {
-          id: `msg-${Date.now()}-err`,
-          sender: 'assistant',
-          text: 'The on-device model is not loaded yet. Please click "Download & Initialize Model" above to load the model into your browser.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'error',
-          errorMsg: 'On-device model weights not loaded.',
-          recoveryGuidance: 'Click "Download & Initialize Model" above to begin setup.',
-        };
-
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === targetConvId
-              ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
-              : conv
-          )
-        );
-        return;
-      }
-
-      if (!selectedModel) {
-
-        const errMsg: UIChatMessage = {
-          id: `msg-${Date.now()}-err`,
-          sender: 'assistant',
-          text: `Cannot send message: No model is currently available or selected for "${activeProvider.name}".`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'error',
-          errorMsg: connectionError || `${activeProvider.name} is offline or unreachable.`,
-          recoveryGuidance:
-            connectionGuidance ||
-            'Ensure Ollama is running (`ollama serve`) and a model is pulled (e.g. `ollama run qwen2.5:3b`).',
-        };
-
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === targetConvId
-              ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
-              : conv
-          )
-        );
-        return;
-      }
-
-      const userMsg: UIChatMessage = {
-        id: `user-${Date.now()}`,
-        sender: 'user',
-        text: cleanText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'sent',
-      };
-
-      const assistantMsgId = `assistant-${Date.now()}`;
-      const initialAssistantMsg: UIChatMessage = {
-        id: assistantMsgId,
-        sender: 'assistant',
-        text: '',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'sending',
-        modelUsed: selectedModel,
-        proposal: null,
-      };
-
-      // Add user message and assistant placeholder immediately
-      setConversations((prev) =>
-        prev.map((conv) => {
-          if (conv.id !== targetConvId) return conv;
-          const isInitialTitle = conv.title === 'New Conversation' || conv.messages.length <= 1;
-          const newTitle = isInitialTitle ? cleanText.slice(0, 36) : conv.title;
-          return {
-            ...conv,
-            title: newTitle,
-            updatedAt: new Date().toISOString(),
-            messages: [...conv.messages, userMsg, initialAssistantMsg],
-          };
-        })
-      );
-
-      setIsLoading(true);
-
-      const controller = new AbortController();
-      activeAbortControllerRef.current = controller;
-      let accumulatedText = '';
-
       try {
-        const currentConv = conversations.find((c) => c.id === targetConvId);
-        const currentMessages = currentConv ? currentConv.messages : [];
+        if (!activeProvider.isImplemented) {
+          const errMsg: UIChatMessage = {
+            id: `msg-${Date.now()}-err`,
+            sender: 'assistant',
+            text: `Provider "${activeProvider.name}" is not implemented in this build.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'error',
+            errorMsg: 'Selected provider is scheduled for a future step.',
+            recoveryGuidance: 'Please switch back to Local Ollama (PC) in the provider selector.',
+          };
 
-        // Build context payload with bounded recent history (8 recent turns for fast CPU processing)
-        const contextPayload: AIChatMessage[] = [
-          { role: 'system', content: buildSystemPrompt() },
-        ];
-
-        const recentHistory = currentMessages
-          .filter((m) => m.status === 'sent' && m.text.trim())
-          .slice(-8);
-
-        for (const m of recentHistory) {
-          contextPayload.push({
-            role: m.sender === 'user' ? 'user' : 'assistant',
-            content: m.text,
-          });
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.id === targetConvId
+                ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
+                : conv
+            )
+          );
+          return;
         }
-        contextPayload.push({
-          role: 'user',
-          content: cleanText,
-        });
 
-        const streamResult = await activeProvider.sendChatStream({
-          model: selectedModel,
-          messages: contextPayload,
-          signal: controller.signal,
-          timeoutMs: 90000,
-          options: {
-            maxTokens: 384,
-            temperature: 0.6,
-            topP: 0.9,
-          },
-          onChunk: (_delta, fullTextSoFar) => {
-            accumulatedText = fullTextSoFar;
-            // Verify conversation is still actively selected by user
-            if (targetConvId !== activeConversationIdRef.current) {
-              return;
-            }
+        // Check if on-device model needs initialization first
+        if (activeProvider.id === 'on_device_mobile' && !activeProvider.isModelLoaded) {
+          const errMsg: UIChatMessage = {
+            id: `msg-${Date.now()}-err`,
+            sender: 'assistant',
+            text: 'The on-device model is not loaded yet. Please click "Download & Initialize Model" above to load the model into your browser.',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'error',
+            errorMsg: 'On-device model weights not loaded.',
+            recoveryGuidance: 'Click "Download & Initialize Model" above to begin setup.',
+          };
+
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.id === targetConvId
+                ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
+                : conv
+            )
+          );
+          return;
+        }
+
+        if (!selectedModel) {
+          const errMsg: UIChatMessage = {
+            id: `msg-${Date.now()}-err`,
+            sender: 'assistant',
+            text: `Cannot send message: No model is currently available or selected for "${activeProvider.name}".`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'error',
+            errorMsg: connectionError || `${activeProvider.name} is offline or unreachable.`,
+            recoveryGuidance:
+              connectionGuidance ||
+              'Ensure Ollama is running (`ollama serve`) and a model is pulled (e.g. `ollama run qwen2.5:3b`).',
+          };
+
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.id === targetConvId
+                ? { ...conv, messages: [...conv.messages, errMsg], updatedAt: new Date().toISOString() }
+                : conv
+            )
+          );
+          return;
+        }
+
+        const userMsg: UIChatMessage = {
+          id: `user-${Date.now()}`,
+          sender: 'user',
+          text: cleanText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'sent',
+        };
+
+        const assistantMsgId = `assistant-${Date.now()}`;
+        const initialAssistantMsg: UIChatMessage = {
+          id: assistantMsgId,
+          sender: 'assistant',
+          text: '',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'sending',
+          modelUsed: selectedModel,
+          proposal: null,
+        };
+
+        // Add user message and assistant placeholder immediately
+        setConversations((prev) =>
+          prev.map((conv) => {
+            if (conv.id !== targetConvId) return conv;
+            const isInitialTitle = conv.title === 'New Conversation' || conv.messages.length <= 1;
+            const newTitle = isInitialTitle ? cleanText.slice(0, 36) : conv.title;
+            return {
+              ...conv,
+              title: newTitle,
+              updatedAt: new Date().toISOString(),
+              messages: [...conv.messages, userMsg, initialAssistantMsg],
+            };
+          })
+        );
+
+        setIsLoading(true);
+
+        const controller = new AbortController();
+        activeAbortControllerRef.current = controller;
+        let accumulatedText = '';
+
+        try {
+          const currentConv = conversations.find((c) => c.id === targetConvId);
+          const currentMessages = currentConv ? currentConv.messages : [];
+
+          // Build context payload with bounded recent history (8 recent turns for fast processing)
+          const contextPayload: AIChatMessage[] = [
+            { role: 'system', content: buildSystemPrompt() },
+          ];
+
+          const recentHistory = currentMessages
+            .filter((m) => m.status === 'sent' && m.text.trim())
+            .slice(-8);
+
+          for (const m of recentHistory) {
+            contextPayload.push({
+              role: m.sender === 'user' ? 'user' : 'assistant',
+              content: m.text,
+            });
+          }
+          contextPayload.push({
+            role: 'user',
+            content: cleanText,
+          });
+
+          const streamResult = await activeProvider.sendChatStream({
+            model: selectedModel,
+            messages: contextPayload,
+            signal: controller.signal,
+            timeoutMs: 90000,
+            options: {
+              maxTokens: 384,
+              temperature: 0.6,
+              topP: 0.9,
+            },
+            onChunk: (_delta, fullTextSoFar) => {
+              accumulatedText = fullTextSoFar;
+              if (targetConvId !== activeConversationIdRef.current) {
+                return;
+              }
+
+              setConversations((prev) =>
+                prev.map((conv) => {
+                  if (conv.id !== targetConvId) return conv;
+                  return {
+                    ...conv,
+                    messages: conv.messages.map((m) =>
+                      m.id === assistantMsgId ? { ...m, text: fullTextSoFar } : m
+                    ),
+                  };
+                })
+              );
+            },
+          });
+
+          if (streamResult.totalDurationMs) {
+            setBenchmarkTimingMs(streamResult.totalDurationMs);
+          }
+
+          if (targetConvId !== activeConversationIdRef.current) {
+            return;
+          }
+
+          // Parse for action proposals ONLY after complete stream has finished
+          const parsedAction = parseActionProposal(streamResult.content || accumulatedText);
+
+          setConversations((prev) =>
+            prev.map((conv) => {
+              if (conv.id !== targetConvId) return conv;
+              return {
+                ...conv,
+                messages: conv.messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        text: parsedAction.cleanText,
+                        status: 'sent',
+                        modelUsed: streamResult.modelUsed || selectedModel,
+                        proposal: parsedAction.proposal,
+                      }
+                    : m
+                ),
+                updatedAt: new Date().toISOString(),
+              };
+            })
+          );
+        } catch (err: unknown) {
+          if (targetConvId !== activeConversationIdRef.current) {
+            return;
+          }
+
+          if (err instanceof AIProviderError && err.code === 'aborted') {
+            const finalPartial = accumulatedText.trim();
+            setConversations((prev) =>
+              prev.map((conv) => {
+                if (conv.id !== targetConvId) return conv;
+                return {
+                  ...conv,
+                  messages: conv.messages.map((m) => {
+                    if (m.id !== assistantMsgId) return m;
+                    return {
+                      ...m,
+                      text: finalPartial
+                        ? `${finalPartial}\n\n[Generation stopped by user]`
+                        : '[Generation stopped by user]',
+                      status: 'sent',
+                      proposal: null,
+                    };
+                  }),
+                  updatedAt: new Date().toISOString(),
+                };
+              })
+            );
+          } else if (err instanceof AIProviderError && err.code === 'timeout') {
+            const finalPartial = accumulatedText.trim();
+            setConversations((prev) =>
+              prev.map((conv) => {
+                if (conv.id !== targetConvId) return conv;
+                return {
+                  ...conv,
+                  messages: conv.messages.map((m) => {
+                    if (m.id !== assistantMsgId) return m;
+                    return {
+                      ...m,
+                      text: finalPartial
+                        ? `${finalPartial}\n\n[Request timed out. Please retry or choose a lighter model.]`
+                        : `[Request timed out after waiting for response from "${activeProvider.name}". Please retry or choose a lighter model.]`,
+                      status: 'error',
+                      errorMsg: err.message,
+                      recoveryGuidance:
+                        err.recoveryGuidance || 'Upstream provider timed out. Try again or select a faster model.',
+                      proposal: null,
+                    };
+                  }),
+                  updatedAt: new Date().toISOString(),
+                };
+              })
+            );
+          } else {
+            const providerErr = err instanceof AIProviderError ? err : null;
+            const errorMsgText = providerErr?.message || (err instanceof Error ? err.message : 'Unknown AI Provider error');
+            const guidance =
+              providerErr?.recoveryGuidance ||
+              'Verify that the active AI provider is running and accessible.';
 
             setConversations((prev) =>
               prev.map((conv) => {
                 if (conv.id !== targetConvId) return conv;
                 return {
                   ...conv,
-                  messages: conv.messages.map((m) =>
-                    m.id === assistantMsgId ? { ...m, text: fullTextSoFar } : m
-                  ),
+                  messages: conv.messages.map((m) => {
+                    if (m.id !== assistantMsgId) return m;
+                    return {
+                      ...m,
+                      text: accumulatedText.trim()
+                        ? `${accumulatedText.trim()}\n\n[Generation interrupted due to error]`
+                        : `Failed to receive response from provider "${activeProvider.name}" (${selectedModel}).`,
+                      status: 'error',
+                      errorMsg: errorMsgText,
+                      recoveryGuidance: guidance,
+                      proposal: null,
+                    };
+                  }),
+                  updatedAt: new Date().toISOString(),
                 };
               })
             );
-          },
-        });
-
-        if (streamResult.totalDurationMs) {
-          setBenchmarkTimingMs(streamResult.totalDurationMs);
-        }
-
-        // Ensure we only finalize if user hasn't switched away
-
-        if (targetConvId !== activeConversationIdRef.current) {
-          return;
-        }
-
-        // Parse for action proposals ONLY after complete stream has finished
-        const parsedAction = parseActionProposal(streamResult.content || accumulatedText);
-
-        setConversations((prev) =>
-          prev.map((conv) => {
-            if (conv.id !== targetConvId) return conv;
-            return {
-              ...conv,
-              messages: conv.messages.map((m) =>
-                m.id === assistantMsgId
-                  ? {
-                      ...m,
-                      text: parsedAction.cleanText,
-                      status: 'sent',
-                      modelUsed: streamResult.modelUsed || selectedModel,
-                      proposal: parsedAction.proposal,
-                    }
-                  : m
-              ),
-              updatedAt: new Date().toISOString(),
-            };
-          })
-        );
-      } catch (err: unknown) {
-        if (targetConvId !== activeConversationIdRef.current) {
-          return;
-        }
-
-        if (err instanceof AIProviderError && err.code === 'aborted') {
-          const finalPartial = accumulatedText.trim();
-          setConversations((prev) =>
-            prev.map((conv) => {
-              if (conv.id !== targetConvId) return conv;
-              return {
-                ...conv,
-                messages: conv.messages.map((m) => {
-                  if (m.id !== assistantMsgId) return m;
-                  return {
-                    ...m,
-                    text: finalPartial
-                      ? `${finalPartial}\n\n[Generation stopped]`
-                      : '[Message generation cancelled]',
-                    status: 'sent',
-                    proposal: null,
-                  };
-                }),
-                updatedAt: new Date().toISOString(),
-              };
-            })
-          );
-        } else {
-          const providerErr = err instanceof AIProviderError ? err : null;
-          const errorMsgText = providerErr?.message || (err instanceof Error ? err.message : 'Unknown AI Provider error');
-          const guidance =
-            providerErr?.recoveryGuidance ||
-            'Verify that the active AI provider is running and accessible.';
-
-          setConversations((prev) =>
-            prev.map((conv) => {
-              if (conv.id !== targetConvId) return conv;
-              return {
-                ...conv,
-                messages: conv.messages.map((m) => {
-                  if (m.id !== assistantMsgId) return m;
-                  return {
-                    ...m,
-                    text: accumulatedText.trim()
-                      ? `${accumulatedText.trim()}\n\n[Generation interrupted due to error]`
-                      : `Failed to receive response from provider "${activeProvider.name}" (${selectedModel}).`,
-                    status: 'error',
-                    errorMsg: errorMsgText,
-                    recoveryGuidance: guidance,
-                    proposal: null,
-                  };
-                }),
-                updatedAt: new Date().toISOString(),
-              };
-            })
-          );
+          }
         }
       } finally {
         activeAbortControllerRef.current = null;
         setIsLoading(false);
+        isSendingRef.current = false;
       }
     },
     [isLoading, activeProvider, selectedModel, conversations, connectionError, connectionGuidance]

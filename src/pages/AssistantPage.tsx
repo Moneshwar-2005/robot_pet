@@ -26,6 +26,7 @@ import { useAssistantChat } from '../hooks/useAssistantChat';
 import { useAuth } from '../context/useAuth';
 import { ActionProposalCard } from '../components/assistant/ActionProposalCard';
 import { WebLLMSetupPanel } from '../components/assistant/WebLLMSetupPanel';
+import { CloudAISetupPanel } from '../components/assistant/CloudAISetupPanel';
 import type { Task, Reminder, PageId } from '../types';
 import type { ActionProposal, TaskProposalPayload, ReminderProposalPayload } from '../lib/assistantActions';
 import type { AIProviderId } from '../lib/ai';
@@ -109,9 +110,8 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault();
-      handleSendMessage(e);
     }
   };
 
@@ -292,6 +292,55 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
         >
           <AlertCircle size={12} />
           <span>{isModelCached ? 'On-Device AI (Cached)' : 'On-Device AI (Setup Required)'}</span>
+        </div>
+      );
+    }
+
+    if (activeProviderId === 'hosted_cloud') {
+      if (connectionState === 'connected') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--status-green)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span className="brand-pulse-dot" />
+            <span>Cloud AI Ready ({selectedModel})</span>
+          </div>
+        );
+      }
+      if (connectionState === 'checking') {
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Checking Cloud AI...</span>
+          </div>
+        );
+      }
+      return (
+        <div
+          style={{
+            fontSize: '11px',
+            color: 'var(--status-amber)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <AlertCircle size={12} />
+          <span>Cloud AI (Setup Required)</span>
         </div>
       );
     }
@@ -586,6 +635,16 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
           />
         )}
 
+        {/* Optional Cloud AI Setup Card */}
+        {activeProviderId === 'hosted_cloud' && (
+          <CloudAISetupPanel
+            connectionState={connectionState}
+            connectionError={connectionError}
+            onRefresh={refreshConnection}
+            onSwitchToOllama={() => selectProvider('ollama')}
+          />
+        )}
+
         {/* Offline / Setup Recovery Guidance Banner for Ollama */}
         {activeProviderId === 'ollama' && connectionState !== 'connected' && connectionState !== 'checking' && (
           <div
@@ -654,15 +713,35 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
               )}
             </div>
 
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '6px 12px', fontSize: '12px', flexShrink: 0 }}
-              onClick={refreshConnection}
-            >
-              <RefreshCw size={13} />
-              <span>Retry</span>
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+                onClick={refreshConnection}
+              >
+                <RefreshCw size={13} />
+                <span>Retry</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '4px 8px', fontSize: '10.5px' }}
+                onClick={() => selectProvider('on_device_mobile')}
+                title="Switch to in-browser WebLLM"
+              >
+                Use WebLLM
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '4px 8px', fontSize: '10.5px' }}
+                onClick={() => selectProvider('hosted_cloud')}
+                title="Switch to Cloud AI"
+              >
+                Use Cloud AI
+              </button>
+            </div>
           </div>
         )}
 

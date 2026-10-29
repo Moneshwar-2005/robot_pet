@@ -4,6 +4,7 @@ export type { SyncStatus } from './sync';
 export type PageId =
   | 'dashboard'
   | 'pet-studio'
+  | 'activities'
   | 'assistant'
   | 'tasks'
   | 'reminders'

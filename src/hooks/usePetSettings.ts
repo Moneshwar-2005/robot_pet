@@ -8,6 +8,16 @@ import { DEFAULT_DOCUMENTED_PET_SETTINGS } from '../lib/pet/faceLifecycle';
 
 export const defaultPetSettings: ClientPetSettings = DEFAULT_DOCUMENTED_PET_SETTINGS;
 
+function loadDemoPetSettings(): ClientPetSettings {
+  try {
+    const raw = localStorage.getItem('kuro_demo_pet_settings');
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch {}
+  return defaultPetSettings;
+}
+
 export interface UsePetSettingsReturn {
   petSettings: ClientPetSettings;
   loading: boolean;
@@ -20,7 +30,7 @@ export interface UsePetSettingsReturn {
 
 export function usePetSettings(): UsePetSettingsReturn {
   const { user } = useAuth();
-  const [demoSettings, setDemoSettings] = useState<ClientPetSettings>(defaultPetSettings);
+  const [demoSettings, setDemoSettings] = useState<ClientPetSettings>(loadDemoPetSettings);
   const [dbSettings, setDbSettings] = useState<ClientPetSettings>(defaultPetSettings);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(user));
@@ -139,7 +149,13 @@ export function usePetSettings(): UsePetSettingsReturn {
 
       // Local demo mode
       if (!user || !supabase) {
-        setDemoSettings((prev) => ({ ...prev, ...partial }));
+        setDemoSettings((prev) => {
+          const next = { ...prev, ...partial };
+          try {
+            localStorage.setItem('kuro_demo_pet_settings', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return true;
       }
 
@@ -185,6 +201,9 @@ export function usePetSettings(): UsePetSettingsReturn {
 
   const resetDemoData = useCallback(() => {
     if (!user) {
+      try {
+        localStorage.removeItem('kuro_demo_pet_settings');
+      } catch {}
       setDemoSettings(defaultPetSettings);
       setError(null);
     }

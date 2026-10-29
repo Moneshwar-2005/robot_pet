@@ -11,6 +11,7 @@ import {
   getOutboxOperationsForScope,
 } from '../lib/offlineDb';
 import { processOutbox, subscribeEntitySync } from '../lib/syncEngine';
+import { unmarkReminderNotified } from '../lib/notifications';
 
 export interface UseRemindersReturn {
   reminders: Reminder[];
@@ -18,16 +19,26 @@ export interface UseRemindersReturn {
   error: string | null;
   addReminder: (newReminderData: Omit<Reminder, 'id'>) => Promise<void>;
   toggleReminder: (reminderId: string) => Promise<void>;
+  snoozeReminder: (reminderId: string, minutes?: number) => Promise<void>;
   deleteReminder: (reminderId: string) => Promise<void>;
   retry: () => void;
   resetDemoData: () => void;
 }
 
+function loadDemoReminders(): Reminder[] {
+  try {
+    const raw = localStorage.getItem('kuro_demo_reminders');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return initialReminders.map((r) => ({ ...r, syncStatus: 'local-only' }));
+}
+
 export function useReminders(): UseRemindersReturn {
   const { user } = useAuth();
-  const [demoReminders, setDemoReminders] = useState<Reminder[]>(() =>
-    initialReminders.map((r) => ({ ...r, syncStatus: 'local-only' }))
-  );
+  const [demoReminders, setDemoReminders] = useState<Reminder[]>(loadDemoReminders);
   const [dbReminders, setDbReminders] = useState<Reminder[]>([]);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(user));
@@ -208,7 +219,13 @@ export function useReminders(): UseRemindersReturn {
           id: `rem-${Date.now()}`,
           syncStatus: 'local-only',
         };
-        setDemoReminders((prev) => [newReminder, ...prev]);
+        setDemoReminders((prev) => {
+          const next = [newReminder, ...prev];
+          try {
+            localStorage.setItem('kuro_demo_reminders', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -256,15 +273,72 @@ export function useReminders(): UseRemindersReturn {
     [user]
   );
 
+  const snoozeReminder = useCallback(
+    async (reminderId: string, minutes = 5) => {
+      setError(null);
+      const snoozeMs = minutes * 60 * 1000;
+      const targetTime = new Date(Date.now() + snoozeMs).toISOString();
+
+      // Unmark from notified set so it can alert again when due
+      unmarkReminderNotified(reminderId);
+
+      // Local / unauthenticated demo mode
+      if (!user) {
+        setDemoReminders((prev) => {
+          const next = prev.map((r) =>
+            r.id === reminderId ? { ...r, time: targetTime, done: false } : r
+          );
+          try {
+            localStorage.setItem('kuro_demo_reminders', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        return;
+      }
+
+      // Authenticated mode: optimistic update
+      setDbReminders((prev) => {
+        const next = prev.map((r) =>
+          r.id === reminderId
+            ? { ...r, time: targetTime, done: false, syncStatus: 'pending-sync' as const }
+            : r
+        );
+        void setOfflineCacheItem(user.id, 'reminders', next);
+        return next;
+      });
+
+      // Enqueue outbox update operation
+      await enqueueOutboxOperation({
+        id: crypto.randomUUID(),
+        scope: user.id,
+        entityType: 'reminder',
+        entityId: reminderId,
+        action: 'update',
+        payload: { remind_at: targetTime, done: false },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'pending',
+        retryCount: 0,
+      });
+
+      void processOutbox(user.id);
+    },
+    [user]
+  );
+
   const toggleReminder = useCallback(
     async (reminderId: string) => {
       setError(null);
 
       // Local / unauthenticated demo mode
       if (!user) {
-        setDemoReminders((prev) =>
-          prev.map((r) => (r.id === reminderId ? { ...r, done: !r.done } : r))
-        );
+        setDemoReminders((prev) => {
+          const next = prev.map((r) => (r.id === reminderId ? { ...r, done: !r.done } : r));
+          try {
+            localStorage.setItem('kuro_demo_reminders', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -309,7 +383,13 @@ export function useReminders(): UseRemindersReturn {
 
       // Local / unauthenticated demo mode
       if (!user) {
-        setDemoReminders((prev) => prev.filter((r) => r.id !== reminderId));
+        setDemoReminders((prev) => {
+          const next = prev.filter((r) => r.id !== reminderId);
+          try {
+            localStorage.setItem('kuro_demo_reminders', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -348,6 +428,9 @@ export function useReminders(): UseRemindersReturn {
 
   const resetDemoData = useCallback(() => {
     if (!user) {
+      try {
+        localStorage.removeItem('kuro_demo_reminders');
+      } catch {}
       setDemoReminders(initialReminders.map((r) => ({ ...r, syncStatus: 'local-only' })));
       setError(null);
     }
@@ -359,6 +442,7 @@ export function useReminders(): UseRemindersReturn {
     error,
     addReminder,
     toggleReminder,
+    snoozeReminder,
     deleteReminder,
     retry,
     resetDemoData,

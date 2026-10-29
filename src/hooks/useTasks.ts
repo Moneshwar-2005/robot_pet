@@ -17,17 +17,27 @@ export interface UseTasksReturn {
   loading: boolean;
   error: string | null;
   addTask: (newTaskData: Omit<Task, 'id'>) => Promise<void>;
+  editTask: (taskId: string, updates: Partial<Omit<Task, 'id'>>) => Promise<void>;
   toggleTask: (taskId: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   retry: () => void;
   resetDemoData: () => void;
 }
 
+function loadDemoTasks(): Task[] {
+  try {
+    const raw = localStorage.getItem('kuro_demo_tasks');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return initialTasks.map((t) => ({ ...t, syncStatus: 'local-only' }));
+}
+
 export function useTasks(): UseTasksReturn {
   const { user } = useAuth();
-  const [demoTasks, setDemoTasks] = useState<Task[]>(() =>
-    initialTasks.map((t) => ({ ...t, syncStatus: 'local-only' }))
-  );
+  const [demoTasks, setDemoTasks] = useState<Task[]>(loadDemoTasks);
   const [dbTasks, setDbTasks] = useState<Task[]>([]);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(user));
@@ -209,7 +219,13 @@ export function useTasks(): UseTasksReturn {
           id: `task-${Date.now()}`,
           syncStatus: 'local-only',
         };
-        setDemoTasks((prev) => [newTask, ...prev]);
+        setDemoTasks((prev) => {
+          const next = [newTask, ...prev];
+          try {
+            localStorage.setItem('kuro_demo_tasks', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -249,15 +265,74 @@ export function useTasks(): UseTasksReturn {
     [user]
   );
 
+  const editTask = useCallback(
+    async (taskId: string, updates: Partial<Omit<Task, 'id'>>) => {
+      setError(null);
+
+      // Local / unauthenticated demo mode
+      if (!user) {
+        setDemoTasks((prev) => {
+          const next = prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t));
+          try {
+            localStorage.setItem('kuro_demo_tasks', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        return;
+      }
+
+      // Authenticated mode: optimistic update
+      setDbTasks((prev) => {
+        const next = prev.map((t) =>
+          t.id === taskId ? { ...t, ...updates, syncStatus: 'pending-sync' as const } : t
+        );
+        void setOfflineCacheItem(user.id, 'tasks', next);
+        return next;
+      });
+
+      // Prepare payload for database update
+      const dbPayload: Record<string, unknown> = {};
+      if (updates.title !== undefined) dbPayload.title = updates.title;
+      if (updates.category !== undefined) dbPayload.category = updates.category;
+      if (updates.priority !== undefined) dbPayload.priority = updates.priority;
+      if (updates.dueDate !== undefined) dbPayload.due_date = updates.dueDate;
+      if (updates.dueTime !== undefined) dbPayload.due_time = updates.dueTime;
+      if (updates.estimatedMinutes !== undefined) dbPayload.estimated_minutes = updates.estimatedMinutes;
+      if (updates.completed !== undefined) dbPayload.completed = updates.completed;
+      if (updates.tags !== undefined) dbPayload.tags = updates.tags;
+      if (updates.description !== undefined) dbPayload.description = updates.description;
+
+      await enqueueOutboxOperation({
+        id: crypto.randomUUID(),
+        scope: user.id,
+        entityType: 'task',
+        entityId: taskId,
+        action: 'update',
+        payload: dbPayload,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'pending',
+        retryCount: 0,
+      });
+
+      void processOutbox(user.id);
+    },
+    [user]
+  );
+
   const toggleTask = useCallback(
     async (taskId: string) => {
       setError(null);
 
       // Local / unauthenticated demo mode
       if (!user) {
-        setDemoTasks((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t))
-        );
+        setDemoTasks((prev) => {
+          const next = prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t));
+          try {
+            localStorage.setItem('kuro_demo_tasks', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -300,7 +375,13 @@ export function useTasks(): UseTasksReturn {
 
       // Local / unauthenticated demo mode
       if (!user) {
-        setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
+        setDemoTasks((prev) => {
+          const next = prev.filter((t) => t.id !== taskId);
+          try {
+            localStorage.setItem('kuro_demo_tasks', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
 
@@ -339,6 +420,9 @@ export function useTasks(): UseTasksReturn {
 
   const resetDemoData = useCallback(() => {
     if (!user) {
+      try {
+        localStorage.removeItem('kuro_demo_tasks');
+      } catch {}
       setDemoTasks(initialTasks.map((t) => ({ ...t, syncStatus: 'local-only' })));
       setError(null);
     }
@@ -349,6 +433,7 @@ export function useTasks(): UseTasksReturn {
     loading: activeLoading,
     error,
     addTask,
+    editTask,
     toggleTask,
     deleteTask,
     retry,

@@ -14,14 +14,17 @@ import type {
   PetEyeStyle,
   Task,
   Reminder,
+  ReactionFrequency,
 } from '../types';
 import type { ClientPetSettings } from '../lib/adapters';
 import {
   evaluatePetContext,
+  getCooldownMsForFrequency,
   type PetFocusState,
   type PetCompanionState,
   type PetBrowserState,
 } from '../lib/pet/autonomousEngine';
+import { calculateSpeechDuration } from '../lib/pet/faceLifecycle';
 
 export interface UseAutonomousPetProps {
   tasks: readonly Task[];
@@ -47,6 +50,10 @@ export interface UseAutonomousPetReturn {
   resumeAutonomy: () => Promise<boolean>;
   isPaused: boolean;
   lastRuleTriggered: string;
+  lastSpeechTimestamp: number;
+  cooldownMs: number;
+  nextEligibleSpeechTimestamp: number;
+  effectiveFrequency: ReactionFrequency;
 }
 
 export function useAutonomousPet({
@@ -75,6 +82,8 @@ export function useAutonomousPet({
   const manualInteractionRef = useRef<{ selectedMood: PetMood; timestamp: number } | null>(null);
   const lastSpeechTextRef = useRef<string | null>(null);
   const lastSpeechTimestampRef = useRef<number>(0);
+  const [lastSpeechTimestampState, setLastSpeechTimestampState] = useState<number>(0);
+  const speechTimerRef = useRef<number | null>(null);
 
   // Keep references to dynamic props for stable interval callback
   const propsRef = useRef({
@@ -108,17 +117,35 @@ export function useAutonomousPet({
     setCurrentMood(mood);
   }, []);
 
-  const triggerManualSpeech = useCallback((text: string) => {
-    if (!text || !text.trim()) return;
-    setSpeechText(text.trim());
-    setIsSpeaking(true);
-    lastSpeechTextRef.current = text.trim();
-    lastSpeechTimestampRef.current = Date.now();
-  }, []);
-
   const stopSpeech = useCallback(() => {
+    if (speechTimerRef.current !== null) {
+      window.clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
     setIsSpeaking(false);
     setSpeechText(null);
+  }, []);
+
+  const triggerManualSpeech = useCallback((text: string) => {
+    if (!text || !text.trim()) return;
+    if (speechTimerRef.current !== null) {
+      window.clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    const clean = text.trim();
+    const now = Date.now();
+    setSpeechText(clean);
+    setIsSpeaking(true);
+    lastSpeechTextRef.current = clean;
+    lastSpeechTimestampRef.current = now;
+    setLastSpeechTimestampState(now);
+
+    const duration = calculateSpeechDuration(clean);
+    speechTimerRef.current = window.setTimeout(() => {
+      setIsSpeaking(false);
+      setSpeechText(null);
+      speechTimerRef.current = null;
+    }, duration);
   }, []);
 
   const pauseAutonomy = useCallback(
@@ -139,10 +166,15 @@ export function useAutonomousPet({
     petSettings.pausedUntil && currentTimestamp < petSettings.pausedUntil
   );
 
+  const effectiveFrequency = petSettings.reactionFrequency || 'balanced';
+  const cooldownMs = getCooldownMsForFrequency(effectiveFrequency);
+  const nextEligibleSpeechTimestamp = lastSpeechTimestampState > 0 ? lastSpeechTimestampState + cooldownMs : 0;
+
   // 5-Second Autonomous Cadence
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      setCurrentTimestamp(Date.now());
+      const now = Date.now();
+      setCurrentTimestamp(now);
       const {
         tasks: currentTasks,
         reminders: currentReminders,
@@ -182,15 +214,32 @@ export function useAutonomousPet({
 
       // Trigger speech if scheduled by engine
       if (evalResult.shouldSpeak && evalResult.speechText) {
+        if (speechTimerRef.current !== null) {
+          window.clearTimeout(speechTimerRef.current);
+          speechTimerRef.current = null;
+        }
+
         setSpeechText(evalResult.speechText);
         setIsSpeaking(true);
         lastSpeechTextRef.current = evalResult.speechText;
-        lastSpeechTimestampRef.current = Date.now();
+        lastSpeechTimestampRef.current = now;
+        setLastSpeechTimestampState(now);
+
+        const duration = evalResult.speechDurationMs || 3500;
+        speechTimerRef.current = window.setTimeout(() => {
+          setIsSpeaking(false);
+          setSpeechText(null);
+          speechTimerRef.current = null;
+        }, duration);
       }
     }, 5000);
 
     return () => {
       window.clearInterval(intervalId);
+      if (speechTimerRef.current !== null) {
+        window.clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -207,5 +256,9 @@ export function useAutonomousPet({
     resumeAutonomy,
     isPaused,
     lastRuleTriggered,
+    lastSpeechTimestamp: lastSpeechTimestampState,
+    cooldownMs,
+    nextEligibleSpeechTimestamp,
+    effectiveFrequency,
   };
 }

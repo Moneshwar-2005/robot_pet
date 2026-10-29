@@ -4,6 +4,7 @@ import type { ClientPetSettings } from '../lib/adapters';
 import { defaultPetSettings } from '../hooks/usePetSettings';
 import { PetFacePreview } from '../components/pet/PetFacePreview';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
+import { HardwareDeviceCard } from '../components/pet/HardwareDeviceCard';
 import {
   ALL_MOUTH_STYLES,
   DEFAULT_DOCUMENTED_PET_SETTINGS,
@@ -11,7 +12,6 @@ import {
   getMoodDefaultEyeStyle,
 } from '../lib/pet/faceLifecycle';
 import {
-  Cpu,
   Sliders,
   Eye,
   Check,
@@ -60,6 +60,9 @@ interface PetStudioPageProps {
   isAutonomousPaused?: boolean;
   onPauseAutonomy?: (minutes?: number) => Promise<boolean>;
   onResumeAutonomy?: () => Promise<boolean>;
+  autonomousCooldownMs?: number;
+  autonomousNextEligibleSpeechTimestamp?: number;
+  autonomousLastRule?: string;
 }
 
 export const PetStudioPage: React.FC<PetStudioPageProps> = ({
@@ -80,6 +83,9 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
   isAutonomousPaused = false,
   onPauseAutonomy,
   onResumeAutonomy,
+  autonomousCooldownMs = 60000,
+  autonomousNextEligibleSpeechTimestamp = 0,
+  autonomousLastRule = 'idle',
 }) => {
   const [nameInput, setNameInput] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -530,38 +536,12 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
             </form>
           </div>
 
-          {/* Physical Hardware Mapping Card */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title-group">
-                <Cpu className="card-icon" />
-                <div>
-                  <h3 className="card-title">Physical Hardware Mapping</h3>
-                  <p className="card-subtitle">Approved Phase 7 hardware specification</p>
-                </div>
-              </div>
-              <span className="badge badge-planned">Planned (Phase 7)</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Microcontroller</span>
-                <span className="mono">ESP32-S3 Dual-Core (Phase 7)</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Visor Display Protocol</span>
-                <span className="mono">2.4" TFT LCD Display (320x240 SPI)</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Physical Actuation</span>
-                <span className="mono">None (Screen-Only Enclosure, Fixed Visor)</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Audio Output</span>
-                <span className="mono">None (Screen-Only, Visual Speech Phonemes)</span>
-              </div>
-            </div>
-          </div>
+          {/* Physical Robot Companion & Gateway Card (Phase 8.2) */}
+          <HardwareDeviceCard
+            currentMood={currentMood}
+            activePalette={petSettings.glowColor}
+            activeEyeShape={petSettings.eyeShape}
+          />
         </div>
 
         {/* Right Column: Autonomous Pet Settings & Avatar Customization */}
@@ -637,10 +617,22 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
 
               {/* Reaction Frequency */}
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>
-                  Reaction Frequency &amp; Message Cooldown
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', margin: 0 }}>
+                    Reaction Frequency &amp; Message Cooldown
+                  </label>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--accent-primary)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    Active: {Math.round(autonomousCooldownMs / 1000)}s
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
                   {(
                     [
                       { id: 'quiet', label: 'Quiet', sub: '180s cooldown' },
@@ -663,6 +655,55 @@ export const PetStudioPage: React.FC<PetStudioPageProps> = ({
                       </button>
                     );
                   })}
+                </div>
+
+                {/* Live Cooldown Status Feedback */}
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    fontSize: '11.5px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span
+                      style={{
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        backgroundColor:
+                          !isAutonomyActive
+                            ? 'var(--text-muted)'
+                            : isAutonomousPaused
+                              ? 'var(--status-amber)'
+                              : autonomousIsSpeaking
+                                ? 'var(--status-green)'
+                                : currentTime < autonomousNextEligibleSpeechTimestamp
+                                  ? 'var(--status-amber)'
+                                  : 'var(--status-green)',
+                      }}
+                    />
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      {!isAutonomyActive
+                        ? 'Autonomy disabled'
+                        : isAutonomousPaused
+                          ? 'Reactions paused'
+                          : autonomousIsSpeaking
+                            ? 'Speaking active on visor...'
+                            : currentTime < autonomousNextEligibleSpeechTimestamp
+                              ? `Next speech eligible in ${Math.ceil((autonomousNextEligibleSpeechTimestamp - currentTime) / 1000)}s`
+                              : 'Speech cooldown clear (Eligible)'}
+                    </span>
+                  </div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}>
+                    Rule: {autonomousLastRule}
+                  </span>
                 </div>
               </div>
 

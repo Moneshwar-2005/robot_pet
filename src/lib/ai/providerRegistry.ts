@@ -7,13 +7,13 @@
 
 import type { AIProvider, AIProviderId } from './types';
 import { ollamaProvider } from './ollamaProvider';
-import { hostedCloudProvider } from './futureProviders';
+import { cloudProvider } from './cloudProvider';
 import { webllmMobileProvider } from './webllmProvider';
 
 const providers: Record<AIProviderId, AIProvider> = {
   ollama: ollamaProvider,
   on_device_mobile: webllmMobileProvider,
-  hosted_cloud: hostedCloudProvider,
+  hosted_cloud: cloudProvider,
 };
 
 export const DEFAULT_PROVIDER_ID: AIProviderId = 'ollama';
@@ -22,7 +22,7 @@ export function getAllProviders(): AIProvider[] {
   return [
     ollamaProvider,
     webllmMobileProvider,
-    hostedCloudProvider,
+    cloudProvider,
   ];
 }
 
