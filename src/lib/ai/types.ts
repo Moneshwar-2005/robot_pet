@@ -76,6 +76,7 @@ export interface AIChatStreamResult {
   readonly modelUsed: string;
   readonly done: boolean;
   readonly totalDurationMs?: number;
+  readonly ttftMs?: number;
   readonly evalCount?: number;
 }
 

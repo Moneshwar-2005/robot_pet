@@ -3,9 +3,11 @@
 /**
  * Kuro Robot Companion — Display Hardware Abstraction Layer (HAL)
  *
- * Implements a configurable display driver abstraction for 2.4-inch 320x240 SPI TFT panels.
- * Supports primary controller ILI9341 and fallback controller ST7789.
- * Provides basic 2D drawing primitives, text rendering, and backlight PWM control.
+ * Implements a configurable display driver abstraction supporting:
+ * 1. 2.4-inch 320x240 SPI TFT panels (ILI9341 / ST7789) on ESP32-S3
+ * 2. 0.96-inch 128x64 I2C OLED panels (SSD1306) on ESP32-WROOM-32
+ *
+ * Provides basic 2D drawing primitives, text rendering, and brightness control.
  */
 
 #include <stdint.h>
@@ -43,8 +45,8 @@ public:
 
   // Status & Properties
   bool isInitialized() const { return _initialized; }
-  uint16_t getWidth() const { return TFT_SCREEN_WIDTH; }
-  uint16_t getHeight() const { return TFT_SCREEN_HEIGHT; }
+  uint16_t getWidth() const { return SCREEN_WIDTH; }
+  uint16_t getHeight() const { return SCREEN_HEIGHT; }
   const char* getDriverName() const;
 
 protected:
@@ -54,4 +56,3 @@ protected:
 };
 
 extern DisplayHAL display;
-

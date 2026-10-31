@@ -5,6 +5,7 @@
 #include "face_engine.h"
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <math.h>
 
 FaceEngine::FaceEngine(DisplayHAL& disp)
@@ -37,6 +38,10 @@ void FaceEngine::init() {
 }
 
 uint16_t FaceEngine::getPrimaryColor() const {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // On 1-bit monochrome OLED, pixels are either on (COLOR_WHITE) or off (COLOR_BLACK)
+  return COLOR_WHITE;
+#else
   switch (_palette) {
     case GLOW_EMERALD: return COLOR_PALETTE_EMERALD;
     case GLOW_AMBER:   return COLOR_PALETTE_AMBER;
@@ -44,6 +49,7 @@ uint16_t FaceEngine::getPrimaryColor() const {
     case GLOW_CYAN:
     default:           return COLOR_PALETTE_CYAN;
   }
+#endif
 }
 
 void FaceEngine::setMood(const char* moodName) {
@@ -116,8 +122,13 @@ void FaceEngine::cancelSpeech() {
   _speechText[0] = '\0';
   _speechEndMs = 0;
 
-  // Clear speech ribbon area with background color
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // Clear speech ribbon area with background color on OLED
+  _disp.fillRect(0, 50, 128, 14, COLOR_BG_DARK);
+#else
+  // Clear speech ribbon area with background color on TFT
   _disp.fillRect(10, 185, 300, 48, COLOR_BG_DARK);
+#endif
 }
 
 void FaceEngine::setWifiStatus(uint8_t state, const char* ip) {
@@ -143,13 +154,24 @@ void FaceEngine::update(uint32_t nowMs) {
   }
   _lastFrameMs = nowMs;
 
-  // 1. Calculate Idle Breathing Offset (smooth +/- 2px sine wave, period 3.2s)
+  // 1. Calculate Idle Breathing Offset
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // Subtle ±1px sine wave on compact 128x64 display
+  int16_t breathingY = 0;
+  if (strcmp(_currentMood, "sleepy") == 0) {
+    breathingY = (int16_t)(sinf((float)(nowMs % 4000) * (2.0f * 3.14159f / 4000.0f)) * 2.0f);
+  } else if (strcmp(_currentMood, "idle") == 0 || strcmp(_currentMood, "attentive") == 0) {
+    breathingY = (int16_t)(sinf((float)(nowMs % BREATHING_CYCLE_MS) * (2.0f * 3.14159f / (float)BREATHING_CYCLE_MS)) * 1.0f);
+  }
+#else
+  // Smooth ±2px sine wave on 320x240 display
   int16_t breathingY = 0;
   if (strcmp(_currentMood, "sleepy") == 0) {
     breathingY = (int16_t)(sinf((float)(nowMs % 4000) * (2.0f * 3.14159f / 4000.0f)) * 3.0f);
   } else if (strcmp(_currentMood, "idle") == 0 || strcmp(_currentMood, "attentive") == 0) {
     breathingY = (int16_t)(sinf((float)(nowMs % BREATHING_CYCLE_MS) * (2.0f * 3.14159f / (float)BREATHING_CYCLE_MS)) * 2.0f);
   }
+#endif
 
   // 2. Procedural Blinking State Machine
   uint8_t blinkHeight = EYE_HEIGHT;
@@ -161,11 +183,12 @@ void FaceEngine::update(uint32_t nowMs) {
 
   if (_isBlinking) {
     uint32_t blinkElapsed = nowMs - _blinkStartMs;
+    uint8_t minSlitHeight = (EYE_HEIGHT <= 26) ? 2 : 4;
     if (blinkElapsed < BLINK_DURATION_MS / 2) {
       // Closing lids
       float progress = (float)blinkElapsed / ((float)BLINK_DURATION_MS / 2.0f);
       blinkHeight = (uint8_t)(EYE_HEIGHT * (1.0f - progress));
-      if (blinkHeight < 4) blinkHeight = 4;
+      if (blinkHeight < minSlitHeight) blinkHeight = minSlitHeight;
     } else if (blinkElapsed < BLINK_DURATION_MS) {
       // Opening lids
       float progress = (float)(blinkElapsed - BLINK_DURATION_MS / 2) / ((float)BLINK_DURATION_MS / 2.0f);
@@ -181,7 +204,7 @@ void FaceEngine::update(uint32_t nowMs) {
   }
   _currentBlinkHeight = blinkHeight;
 
-  // 3. Speech Ribbon & Mouth Phoneme Progression
+  // 3. Speech Progression & Mouth Phoneme Cadence
   if (_isSpeaking) {
     if (_speechEndMs > FRAME_INTERVAL_MS) {
       _speechEndMs -= FRAME_INTERVAL_MS;
@@ -203,11 +226,41 @@ void FaceEngine::update(uint32_t nowMs) {
 }
 
 void FaceEngine::renderStatusBar() {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // OLED 128x64 Compact Status Line (Header Y: 0..8)
   uint16_t primaryColor = getPrimaryColor();
 
-  // Header Bar background
-  _disp.fillRect(0, 0, TFT_SCREEN_WIDTH, 20, COLOR_BG_DARK);
-  _disp.drawLine(0, 20, TFT_SCREEN_WIDTH - 1, 20, COLOR_BG_CARD);
+  _disp.fillRect(0, 0, SCREEN_WIDTH, 9, COLOR_BG_DARK);
+  _disp.drawLine(0, 8, SCREEN_WIDTH - 1, 8, COLOR_WHITE);
+
+  // Title: "KURO" on left
+  _disp.drawText(2, 0, "KURO", primaryColor, 1);
+
+  // Uppercase Mood Tag in middle (up to 5 chars)
+  char moodTag[6];
+  size_t moodLen = strlen(_currentMood);
+  size_t copyLen = (moodLen > 5) ? 5 : moodLen;
+  for (size_t i = 0; i < copyLen; i++) {
+    moodTag[i] = (char)toupper((unsigned char)_currentMood[i]);
+  }
+  moodTag[copyLen] = '\0';
+  _disp.drawText(46, 0, moodTag, COLOR_WHITE, 1);
+
+  // Compact Wi-Fi status on right
+  if (_wifiState == WIFI_STATE_CONNECTED) {
+    _disp.drawText(94, 0, "[ON]", COLOR_WHITE, 1);
+  } else if (_wifiState == WIFI_STATE_CONNECTING) {
+    _disp.drawText(94, 0, "[..]", COLOR_WHITE, 1);
+  } else {
+    _disp.drawText(94, 0, "[--]", COLOR_WHITE, 1);
+  }
+
+#else
+  // TFT 320x240 Full Status Bar
+  uint16_t primaryColor = getPrimaryColor();
+
+  _disp.fillRect(0, 0, SCREEN_WIDTH, 20, COLOR_BG_DARK);
+  _disp.drawLine(0, 20, SCREEN_WIDTH - 1, 20, COLOR_BG_CARD);
 
   // Brand title on left
   _disp.drawText(8, 6, "KURO", primaryColor, 1);
@@ -223,9 +276,107 @@ void FaceEngine::renderStatusBar() {
   } else {
     _disp.drawText(230, 6, "Offline", COLOR_MUTED, 1);
   }
+#endif
 }
 
 void FaceEngine::drawEyeGeometry(int16_t cx, int16_t cy, bool isLeft, uint8_t blinkHeight) {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // =========================================================================
+  // OLED 128x64 Dedicated Eye Rendering
+  // =========================================================================
+  uint16_t color = COLOR_WHITE;
+  int16_t halfW = EYE_WIDTH / 2; // 12
+  int16_t halfH = blinkHeight / 2;
+
+  // Clear eye bounding box
+  _disp.fillRect(cx - halfW - 2, cy - (EYE_HEIGHT / 2) - 3, EYE_WIDTH + 4, EYE_HEIGHT + 6, COLOR_BG_DARK);
+
+  // 1. Blinking down to horizontal slit
+  if (blinkHeight <= 4) {
+    _disp.fillRoundRect(cx - halfW, cy - 1, EYE_WIDTH, 3, 1, color);
+    return;
+  }
+
+  // 2. Sleepy mood eye rendering (drowsy half-closed lid)
+  if (strcmp(_currentMood, "sleepy") == 0) {
+    _disp.drawRoundRect(cx - halfW, cy + 2, EYE_WIDTH, 6, 2, color);
+    return;
+  }
+
+  // 3. Happy / Excited / Proud mood eye rendering (curved upward arc `^ ^`)
+  if (strcmp(_currentMood, "happy") == 0 || strcmp(_currentMood, "excited") == 0 || strcmp(_currentMood, "proud") == 0) {
+    for (int8_t t = -1; t <= 1; t++) {
+      _disp.drawCircle(cx, cy + 6 + t, halfW - 1, color);
+    }
+    // Mask bottom half
+    _disp.fillRect(cx - halfW - 2, cy + 6, EYE_WIDTH + 4, halfH + 8, COLOR_BG_DARK);
+    return;
+  }
+
+  // 4. Sad / Worried / Error mood (inward drooping upper eyelid)
+  if (strcmp(_currentMood, "sad") == 0 || strcmp(_currentMood, "worried") == 0 || strcmp(_currentMood, "error") == 0) {
+    _disp.fillRoundRect(cx - halfW, cy - halfH + 3, EYE_WIDTH, blinkHeight - 3, 4, color);
+    if (isLeft) {
+      _disp.drawLine(cx - halfW, cy - halfH + 2, cx + halfW, cy - halfH + 7, COLOR_BG_DARK);
+      _disp.drawLine(cx - halfW, cy - halfH + 3, cx + halfW, cy - halfH + 8, COLOR_BG_DARK);
+    } else {
+      _disp.drawLine(cx - halfW, cy - halfH + 7, cx + halfW, cy - halfH + 2, COLOR_BG_DARK);
+      _disp.drawLine(cx - halfW, cy - halfH + 8, cx + halfW, cy - halfH + 3, COLOR_BG_DARK);
+    }
+    return;
+  }
+
+  // 5. Focused mood (sharp squinted eye with locked pupil)
+  if (strcmp(_currentMood, "focused") == 0) {
+    int16_t focusedH = 14;
+    _disp.fillRoundRect(cx - halfW, cy - (focusedH / 2), EYE_WIDTH, focusedH, 3, color);
+    _disp.fillRect(cx - 2, cy - 2, 4, 4, COLOR_BG_DARK);
+    return;
+  }
+
+  // 6. Thinking / Curious / Confused mood (asymmetric gaze shifted up-left)
+  if (strcmp(_currentMood, "thinking") == 0 || strcmp(_currentMood, "curious") == 0 || strcmp(_currentMood, "confused") == 0) {
+    int16_t offsetX = -2;
+    int16_t offsetY = -2;
+    _disp.fillRoundRect(cx - halfW + offsetX, cy - halfH + offsetY, EYE_WIDTH, blinkHeight, 5, color);
+    if (blinkHeight >= 14) {
+      _disp.fillCircle(cx + offsetX - 3, cy + offsetY - 3, 2, COLOR_BG_DARK);
+    }
+    return;
+  }
+
+  // 7. Playful winking mood (left eye winks, right eye open)
+  if (strcmp(_currentMood, "playful") == 0 && isLeft) {
+    _disp.fillRoundRect(cx - halfW, cy - 1, EYE_WIDTH, 3, 1, color);
+    return;
+  }
+
+  // 8. Standard eye rendering according to selected EyeShape
+  switch (_eyeShape) {
+    case EYE_SHAPE_ROUND:
+      _disp.fillRoundRect(cx - halfW, cy - halfH, EYE_WIDTH, blinkHeight, halfH, color);
+      break;
+    case EYE_SHAPE_PIXEL:
+      _disp.fillRect(cx - halfW, cy - halfH, EYE_WIDTH, blinkHeight, color);
+      if (blinkHeight > 10) {
+        _disp.fillRect(cx - 3, cy - 3, 6, 6, COLOR_BG_DARK);
+      }
+      break;
+    case EYE_SHAPE_CURVED:
+    default:
+      // Rounded squircle eye
+      _disp.fillRoundRect(cx - halfW, cy - halfH, EYE_WIDTH, blinkHeight, 6, color);
+      if (blinkHeight >= 14) {
+        int16_t reflX = isLeft ? (cx - 4) : (cx + 2);
+        _disp.fillCircle(reflX, cy - 4, 2, COLOR_BG_DARK);
+      }
+      break;
+  }
+
+#else
+  // =========================================================================
+  // TFT 320x240 Full Color Visor Rendering
+  // =========================================================================
   uint16_t color = getPrimaryColor();
   int16_t halfW = EYE_WIDTH / 2;
   int16_t halfH = blinkHeight / 2;
@@ -247,7 +398,6 @@ void FaceEngine::drawEyeGeometry(int16_t cx, int16_t cy, bool isLeft, uint8_t bl
 
   // Happy mood eye rendering (curved inverted U arc)
   if (strcmp(_currentMood, "happy") == 0 || strcmp(_currentMood, "excited") == 0 || strcmp(_currentMood, "proud") == 0) {
-    // Upper arc
     for (int8_t t = -2; t <= 2; t++) {
       _disp.drawCircle(cx, cy + 12 + t, halfW - 2, color);
     }
@@ -269,7 +419,6 @@ void FaceEngine::drawEyeGeometry(int16_t cx, int16_t cy, bool isLeft, uint8_t bl
       break;
     case EYE_SHAPE_PIXEL:
       _disp.fillRect(cx - halfW, cy - halfH, EYE_WIDTH, blinkHeight, color);
-      // Pixel inner cutout
       if (blinkHeight > 16) {
         _disp.fillRect(cx - 8, cy - 8, 16, 16, COLOR_BG_DARK);
       }
@@ -285,6 +434,7 @@ void FaceEngine::drawEyeGeometry(int16_t cx, int16_t cy, bool isLeft, uint8_t bl
       }
       break;
   }
+#endif
 }
 
 void FaceEngine::renderLeftEye(int16_t yOffset) {
@@ -298,6 +448,74 @@ void FaceEngine::renderRightEye(int16_t yOffset) {
 }
 
 void FaceEngine::drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style, uint8_t phoneme) {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // =========================================================================
+  // OLED 128x64 Dedicated Mouth Rendering
+  // =========================================================================
+  uint16_t color = COLOR_WHITE;
+  int16_t halfW = MOUTH_WIDTH / 2; // 10
+
+  // Clear mouth bounding box
+  _disp.fillRect(cx - halfW - 2, cy - 6, MOUTH_WIDTH + 4, MOUTH_HEIGHT + 6, COLOR_BG_DARK);
+
+  if (_isSpeaking) {
+    switch (phoneme) {
+      case 0: // Closed resting line
+        _disp.fillRoundRect(cx - 5, cy - 1, 10, 2, 1, color);
+        break;
+      case 1: // Small mid oval
+        _disp.fillRoundRect(cx - 4, cy - 2, 8, 4, 2, color);
+        break;
+      case 2: // Wide open oval
+        _disp.fillRoundRect(cx - 7, cy - 3, 14, 6, 2, color);
+        break;
+      case 3: // Open smile
+        _disp.drawCircle(cx, cy - 2, 6, color);
+        _disp.fillRect(cx - 8, cy - 8, 16, 6, COLOR_BG_DARK);
+        break;
+    }
+    return;
+  }
+
+  // Static Mood Mouth Geometries on OLED
+  switch (style) {
+    case MOUTH_OPEN_SMILE:
+    case MOUTH_LAUGH: {
+      int16_t r = (style == MOUTH_LAUGH) ? 8 : 6;
+      _disp.drawCircle(cx, cy - 2, r, color);
+      _disp.fillRect(cx - halfW - 1, cy - 10, MOUTH_WIDTH + 2, 8, COLOR_BG_DARK);
+      break;
+    }
+    case MOUTH_SURPRISED_O:
+      _disp.drawCircle(cx, cy, 3, color);
+      break;
+    case MOUTH_WORRIED_CURVE:
+      _disp.drawCircle(cx, cy + 5, 6, color);
+      _disp.fillRect(cx - halfW - 1, cy + 5, MOUTH_WIDTH + 2, 8, COLOR_BG_DARK);
+      break;
+    case MOUTH_CONFUSED_CROOKED:
+      _disp.drawLine(cx - 6, cy - 1, cx - 1, cy + 2, color);
+      _disp.drawLine(cx - 1, cy + 2, cx + 3, cy - 1, color);
+      _disp.drawLine(cx + 3, cy - 1, cx + 6, cy + 1, color);
+      break;
+    case MOUTH_FOCUSED_LINE:
+      _disp.fillRoundRect(cx - 6, cy - 1, 12, 2, 1, color);
+      break;
+    case MOUTH_SLEEPY:
+    case MOUTH_TINY:
+      _disp.fillRoundRect(cx - 3, cy - 1, 6, 2, 1, color);
+      break;
+    case MOUTH_CLOSED_SMILE:
+    default:
+      _disp.drawCircle(cx, cy - 3, 7, color);
+      _disp.fillRect(cx - halfW - 1, cy - 11, MOUTH_WIDTH + 2, 8, COLOR_BG_DARK);
+      break;
+  }
+
+#else
+  // =========================================================================
+  // TFT 320x240 Full Visor Mouth Rendering
+  // =========================================================================
   uint16_t color = getPrimaryColor();
   int16_t halfW = MOUTH_WIDTH / 2;
 
@@ -305,7 +523,6 @@ void FaceEngine::drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style,
   _disp.fillRect(cx - halfW - 4, cy - 14, MOUTH_WIDTH + 8, MOUTH_HEIGHT + 14, COLOR_BG_DARK);
 
   if (_isSpeaking) {
-    // Dynamic speaking phoneme cycles
     switch (phoneme) {
       case 0: // Closed resting line
         _disp.fillRoundRect(cx - 14, cy - 2, 28, 4, 2, color);
@@ -328,7 +545,6 @@ void FaceEngine::drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style,
   switch (style) {
     case MOUTH_OPEN_SMILE:
     case MOUTH_LAUGH: {
-      // Warm open smile grin
       int16_t r = (style == MOUTH_LAUGH) ? 18 : 14;
       for (int8_t t = -1; t <= 1; t++) {
         _disp.drawCircle(cx, cy - 4 + t, r, color);
@@ -340,7 +556,6 @@ void FaceEngine::drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style,
       _disp.drawCircle(cx, cy, 8, color);
       break;
     case MOUTH_WORRIED_CURVE:
-      // Inverted downturned curve
       for (int8_t t = -1; t <= 1; t++) {
         _disp.drawCircle(cx, cy + 12 + t, 14, color);
       }
@@ -360,13 +575,13 @@ void FaceEngine::drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style,
       break;
     case MOUTH_CLOSED_SMILE:
     default:
-      // Subtle friendly smile curve
       for (int8_t t = -1; t <= 1; t++) {
         _disp.drawCircle(cx, cy - 8 + t, 18, color);
       }
       _disp.fillRect(cx - halfW - 2, cy - 22, MOUTH_WIDTH + 4, 22, COLOR_BG_DARK);
       break;
   }
+#endif
 }
 
 void FaceEngine::renderMouth(int16_t yOffset) {
@@ -377,13 +592,23 @@ void FaceEngine::renderMouth(int16_t yOffset) {
 void FaceEngine::renderSpeechRibbon() {
   if (!_isSpeaking || strlen(_speechText) == 0) return;
 
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // OLED 128x64 Speech Display: bottom single-line card
+  _disp.fillRect(0, 52, 128, 12, COLOR_BG_CARD);
+  _disp.drawLine(0, 51, 127, 51, COLOR_WHITE);
+
+  // Up to 21 chars fit on line 53
+  char truncated[22];
+  strncpy(truncated, _speechText, 21);
+  truncated[21] = '\0';
+  _disp.drawText(2, 53, truncated, COLOR_WHITE, 1);
+
+#else
+  // TFT 320x240 Speech Bubble Card
   uint16_t primaryColor = getPrimaryColor();
 
-  // Speech box background card
   _disp.fillRoundRect(10, 186, 300, 46, 6, COLOR_BG_CARD);
   _disp.drawRoundRect(10, 186, 300, 46, 6, primaryColor);
-
-  // Render text inside speech bubble (up to 2 lines, word-wrapped)
   _disp.drawText(18, 194, _speechText, COLOR_WHITE, 1);
+#endif
 }
-

@@ -116,6 +116,7 @@ export class OllamaAIProvider implements AIProvider {
         modelUsed: streamResult.model,
         done: streamResult.done,
         totalDurationMs: streamResult.totalDuration,
+        ttftMs: streamResult.ttftMs,
         evalCount: streamResult.evalCount,
       };
     } catch (err: unknown) {

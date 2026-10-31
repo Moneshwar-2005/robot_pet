@@ -10,7 +10,7 @@
  * 4. Support version upgrade migrations safely.
  */
 
-import type { OutboxOperation } from '../types/sync';
+import type { OutboxOperation, OutboxEntityType } from '../types/sync';
 
 const DB_NAME = 'kuro_offline_db';
 const DB_VERSION = 2;
@@ -32,7 +32,7 @@ export interface OfflineCacheEntry<T = unknown> {
 export interface OutboxMetaEntry {
   id: string;
   scope: string;
-  entityType: 'task' | 'reminder' | 'memory' | 'session' | 'pet_setting';
+  entityType: OutboxEntityType;
   action: 'create' | 'update' | 'delete';
   createdAt: string;
   status: 'pending' | 'failed';
@@ -214,8 +214,29 @@ export async function deleteOfflineCacheItem(
 
 /**
  * Clears all cache records belonging to a specific scope (e.g., when a user signs out).
+ * Also purges matching user-scoped localStorage keys to prevent private data exposure.
  */
 export async function clearScopeCache(scope: string): Promise<void> {
+  // 1. Purge matching localStorage keys for this user scope to prevent local data exposure
+  if (typeof window !== 'undefined' && window.localStorage && scope) {
+    try {
+      const suffix = `_${scope}`;
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key && (key.endsWith(suffix) || key.includes(suffix))) {
+          keysToRemove.push(key);
+        }
+      }
+      for (const k of keysToRemove) {
+        window.localStorage.removeItem(k);
+      }
+    } catch (e) {
+      console.warn('[Kuro OfflineDB] Failed to clear localStorage for scope:', e);
+    }
+  }
+
+  // 2. Purge IndexedDB OFFLINE_CACHE
   const db = await getOfflineDb();
   if (!db) return;
 

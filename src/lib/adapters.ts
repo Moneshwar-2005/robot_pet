@@ -7,6 +7,7 @@ import type {
   UserPreferencesRow,
   UserMemoryRow,
   WorkSessionRow,
+  RoutineRow,
   TablesInsert,
   TablesUpdate,
 } from '../types/database';
@@ -183,7 +184,34 @@ export interface ClientPetSettings {
 }
 
 /**
+ * Normalizes a pet setting numeric value (playfulness / focusDiscipline) to an integer in [0, 100].
+ * - In the Kuro UI contract, the slider range is integers 0 to 100, where 1 represents 1% and 100 represents 100%.
+ * - If given a decimal strictly in (0, 1.0) (such as 0.01, 0.5, 0.85, 0.99), scales to percentage (1, 50, 85, 99).
+ * - If given 1 or an integer/float >= 1, treats it as already in the [1, 100] percentage domain (e.g. 1 -> 1%, 50 -> 50%, 100 -> 100%), clamped to [0, 100] and rounded.
+ * - If given 0 or negative values (e.g. -10), clamps to 0.
+ * - If given values > 100 (e.g. 150), clamps to 100.
+ * - If given null, undefined, NaN, or non-numeric values, returns the documented fallback.
+ */
+export function normalizePetSettingInt(val: unknown, fallback = 70): number {
+  if (val === undefined || val === null) return fallback;
+  let num: number;
+  if (typeof val === 'number') {
+    num = val;
+  } else if (typeof val === 'string' && val.trim() !== '') {
+    num = Number(val);
+  } else {
+    return fallback;
+  }
+  if (isNaN(num)) return fallback;
+  if (num > 0 && num < 1.0) {
+    return Math.min(100, Math.max(0, Math.round(num * 100)));
+  }
+  return Math.min(100, Math.max(0, Math.round(num)));
+}
+
+/**
  * Maps a database pet_settings row to client settings model.
+ * Enforces integer percentages (0-100) for playfulness and focus_discipline.
  */
 export function petSettingsRowToClient(row: PetSettingsRow): ClientPetSettings {
   return {
@@ -191,13 +219,14 @@ export function petSettingsRowToClient(row: PetSettingsRow): ClientPetSettings {
     avatarVariant: row.avatar_variant,
     eyeShape: row.eye_shape,
     glowColor: row.glow_color,
-    playfulness: row.playfulness,
-    focusDiscipline: row.focus_discipline,
+    playfulness: normalizePetSettingInt(row.playfulness, 70),
+    focusDiscipline: normalizePetSettingInt(row.focus_discipline, 85),
   };
 }
 
 /**
  * Builds an update payload for pet_settings table.
+ * Ensures playfulness and focus_discipline are integers matching PostgreSQL column types.
  */
 export function petSettingsToUpdatePayload(
   settings: Partial<ClientPetSettings>
@@ -207,8 +236,12 @@ export function petSettingsToUpdatePayload(
   if (settings.avatarVariant !== undefined) payload.avatar_variant = settings.avatarVariant;
   if (settings.eyeShape !== undefined) payload.eye_shape = settings.eyeShape;
   if (settings.glowColor !== undefined) payload.glow_color = settings.glowColor;
-  if (settings.playfulness !== undefined) payload.playfulness = settings.playfulness;
-  if (settings.focusDiscipline !== undefined) payload.focus_discipline = settings.focusDiscipline;
+  if (settings.playfulness !== undefined) {
+    payload.playfulness = normalizePetSettingInt(settings.playfulness, 70);
+  }
+  if (settings.focusDiscipline !== undefined) {
+    payload.focus_discipline = normalizePetSettingInt(settings.focusDiscipline, 85);
+  }
   return payload;
 }
 
@@ -239,18 +272,25 @@ export function memoryRowToClient(row: UserMemoryRow): ClientMemory {
 
 /**
  * Maps application Memory input to a database Insert payload.
+ * Preserves client-generated UUID when provided for offline idempotency.
  */
 export function memoryToInsertPayload(
-  memory: { category: string; fact: string; confidence?: number; source?: string },
+  memory: { id?: string; category: string; fact: string; confidence?: number; source?: string },
   userId: string
 ): TablesInsert<'user_memories'> {
-  return {
+  const payload: TablesInsert<'user_memories'> = {
     user_id: userId,
     category: memory.category.trim(),
     fact: memory.fact.trim(),
     confidence: memory.confidence !== undefined ? memory.confidence : 1.0,
     source: memory.source?.trim() || 'User Manual Entry',
   };
+
+  if (memory.id) {
+    payload.id = memory.id;
+  }
+
+  return payload;
 }
 
 export interface ClientWorkSession {
@@ -282,9 +322,11 @@ export function workSessionRowToClient(row: WorkSessionRow): ClientWorkSession {
 
 /**
  * Maps application WorkSession input to a database Insert payload.
+ * Preserves client-generated UUID when provided for offline idempotency.
  */
 export function workSessionToInsertPayload(
   session: {
+    id?: string;
     title: string;
     sessionType?: 'focus' | 'break' | 'long_break';
     durationMinutes: number;
@@ -294,7 +336,7 @@ export function workSessionToInsertPayload(
   },
   userId: string
 ): TablesInsert<'work_sessions'> {
-  return {
+  const payload: TablesInsert<'work_sessions'> = {
     user_id: userId,
     title: session.title.trim(),
     session_type: session.sessionType || 'focus',
@@ -303,6 +345,77 @@ export function workSessionToInsertPayload(
     completed_at: session.completedAt || undefined,
     task_id: session.taskId || null,
   };
+
+  if (session.id) {
+    payload.id = session.id;
+  }
+
+  return payload;
+}
+
+export interface ClientRoutine {
+  id: string;
+  title: string;
+  scheduleType: 'interval' | 'daily' | 'weekly' | 'custom';
+  intervalMinutes: number | null;
+  scheduleTime: string | null;
+  daysOfWeek: number[] | null;
+  timezone: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Maps a database routines row to ClientRoutine.
+ */
+export function routineRowToClient(row: RoutineRow): ClientRoutine {
+  return {
+    id: row.id,
+    title: row.title,
+    scheduleType: row.schedule_type,
+    intervalMinutes: row.interval_minutes,
+    scheduleTime: row.schedule_time,
+    daysOfWeek: row.days_of_week,
+    timezone: row.timezone,
+    enabled: row.enabled,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Maps application Routine input to a database Insert payload.
+ */
+export function routineToInsertPayload(
+  routine: {
+    id?: string;
+    title: string;
+    scheduleType: 'interval' | 'daily' | 'weekly' | 'custom';
+    intervalMinutes?: number | null;
+    scheduleTime?: string | null;
+    daysOfWeek?: number[] | null;
+    timezone?: string;
+    enabled?: boolean;
+  },
+  userId: string
+): TablesInsert<'routines'> {
+  const payload: TablesInsert<'routines'> = {
+    user_id: userId,
+    title: routine.title.trim(),
+    schedule_type: routine.scheduleType,
+    interval_minutes: routine.intervalMinutes ?? null,
+    schedule_time: routine.scheduleTime ?? null,
+    days_of_week: routine.daysOfWeek ?? null,
+    timezone: routine.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    enabled: routine.enabled !== undefined ? routine.enabled : true,
+  };
+
+  if (routine.id) {
+    payload.id = routine.id;
+  }
+
+  return payload;
 }
 
 /**

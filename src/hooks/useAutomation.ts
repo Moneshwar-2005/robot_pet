@@ -18,6 +18,10 @@ import {
   type EvaluateContext,
 } from '../lib/automation/automationEngine';
 import { useAuth } from '../context/useAuth';
+import { supabase } from '../lib/supabase';
+import { enqueueOutboxOperation } from '../lib/offlineDb';
+import { processOutbox } from '../lib/syncEngine';
+import { routineToInsertPayload } from '../lib/adapters';
 import type { PetMood, Reminder } from '../types';
 
 export interface UseAutomationOptions {
@@ -56,7 +60,10 @@ export function useAutomation(options: UseAutomationOptions = {}): UseAutomation
     optionsRef.current = options;
   });
 
+  const routineIdMapRef = useRef<Map<string, string>>(new Map());
+
   // Switch state cleanly when scope / user changes (Account Isolation)
+  // and synchronize with Supabase routines table for authenticated users
   useEffect(() => {
     let isCurrent = true;
     queueMicrotask(() => {
@@ -64,10 +71,67 @@ export function useAutomation(options: UseAutomationOptions = {}): UseAutomation
         setState(loadAutomationState(scope));
       }
     });
+
+    if (user?.id && supabase) {
+      void (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('routines')
+            .select('*')
+            .eq('user_id', user.id);
+
+          if (!isCurrent) return;
+
+          if (!error && data && data.length > 0) {
+            for (const r of data) {
+              routineIdMapRef.current.set(r.title, r.id);
+            }
+            setState((prev) => {
+              const syncedRules = prev.rules.map((rule) => {
+                const match = data.find((r) => r.title === rule.name || r.id === rule.id);
+                if (match) {
+                  return { ...rule, enabled: match.enabled };
+                }
+                return rule;
+              });
+              const next: AutomationState = { ...prev, rules: syncedRules };
+              saveAutomationState(scope, next);
+              return next;
+            });
+          } else if (!error && (!data || data.length === 0)) {
+            // Seed initial routines for newly authenticated user
+            const seededRoutines = DEFAULT_AUTOMATION_RULES.map((rule) => {
+              const routineId = crypto.randomUUID();
+              routineIdMapRef.current.set(rule.name, routineId);
+              return routineToInsertPayload(
+                {
+                  id: routineId,
+                  title: rule.name,
+                  scheduleType:
+                    rule.trigger === 'focus_interval_reached'
+                      ? 'interval'
+                      : rule.trigger === 'daily_schedule'
+                      ? 'daily'
+                      : 'custom',
+                  intervalMinutes: rule.triggerConfig?.intervalMinutes ?? null,
+                  scheduleTime: rule.triggerConfig?.scheduleTime ?? null,
+                  enabled: rule.enabled,
+                },
+                user.id
+              );
+            });
+            await supabase.from('routines').insert(seededRoutines);
+          }
+        } catch {
+          // Gracefully fallback to local automation state
+        }
+      })();
+    }
+
     return () => {
       isCurrent = false;
     };
-  }, [scope]);
+  }, [scope, user?.id]);
 
   const pendingConfirmations = state.logs.filter((l) => l.status === 'pending_confirmation');
 
@@ -84,7 +148,9 @@ export function useAutomation(options: UseAutomationOptions = {}): UseAutomation
 
   const toggleRule = useCallback(
     (ruleId: string) => {
+      let targetRule: AutomationRule | undefined;
       setState((prev) => {
+        targetRule = prev.rules.find((r) => r.id === ruleId);
         const nextRules = prev.rules.map((r) =>
           r.id === ruleId ? { ...r, enabled: !r.enabled } : r
         );
@@ -92,8 +158,29 @@ export function useAutomation(options: UseAutomationOptions = {}): UseAutomation
         saveAutomationState(scope, next);
         return next;
       });
+
+      if (user?.id && targetRule) {
+        const newEnabled = !targetRule.enabled;
+        const routineId = routineIdMapRef.current.get(targetRule.name) || ruleId;
+        void enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'routine',
+          entityId: routineId,
+          action: 'update',
+          payload: { enabled: newEnabled },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        }).then(() => {
+          if (user?.id) {
+            void processOutbox(user.id);
+          }
+        });
+      }
     },
-    [scope]
+    [scope, user]
   );
 
   const resetRules = useCallback(() => {

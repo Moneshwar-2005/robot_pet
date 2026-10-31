@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import type { PageId, Theme, PetMood, PetStatus } from './types';
+import { useState } from 'react';
+import type { PageId, PetMood, PetStatus } from './types';
 import type { PetFocusState } from './lib/pet/autonomousEngine';
 import { initialPetStatus } from './data/mockData';
 import { AppLayout } from './components/layout/AppLayout';
@@ -11,6 +11,7 @@ import { usePetSettings, defaultPetSettings } from './hooks/usePetSettings';
 import { useMemories } from './hooks/useMemories';
 import { useWorkSessions } from './hooks/useWorkSessions';
 import { useProfile } from './hooks/useProfile';
+import { useUserPreferences } from './hooks/useUserPreferences';
 import { useAuth } from './context/useAuth';
 import { useReminderNotifications } from './hooks/useReminderNotifications';
 import { useAutonomousPet } from './hooks/useAutonomousPet';
@@ -31,7 +32,7 @@ import { SettingsPage } from './pages/SettingsPage';
 function AppContent() {
   const { user } = useAuth();
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
-  const [theme, setTheme] = useState<Theme>('dark');
+  const { theme, toggleTheme } = useUserPreferences();
   const [currentMood, setCurrentMood] = useState<PetMood>('attentive');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [activeFocusSession, setActiveFocusSession] = useState<PetFocusState | null>(null);
@@ -147,14 +148,6 @@ function AppContent() {
     autonomousPet.setMood(mood);
   };
 
-  // Sync theme with HTML data-theme attribute
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
 
   const handleResetPetSettings = async () => {
     resetPetSettingsDemoData();
@@ -255,6 +248,7 @@ function AppContent() {
             onAddTask={addTask}
             onAddReminder={addReminder}
             onNavigate={setCurrentPage}
+            memories={memories}
           />
         );
       case 'tasks':

@@ -16,11 +16,11 @@ import {
   updateOutboxOperation,
   getPendingOutboxCount,
 } from './offlineDb';
-import type { OutboxOperation, SyncState } from '../types/sync';
+import type { OutboxOperation, SyncState, OutboxEntityType } from '../types/sync';
 import type { TablesInsert, TablesUpdate } from '../types/database';
 
 type SyncListener = (state: SyncState) => void;
-type EntitySyncListener = (entityType: 'task' | 'reminder', entityId: string, status: 'synced' | 'sync-error') => void;
+type EntitySyncListener = (entityType: OutboxEntityType, entityId: string, status: 'synced' | 'sync-error') => void;
 
 let activeUserId: string | null = null;
 let isSyncing = false;
@@ -46,7 +46,7 @@ function notifyListeners(pendingCount = 0) {
   }
 }
 
-function notifyEntitySynced(entityType: 'task' | 'reminder', entityId: string, status: 'synced' | 'sync-error') {
+function notifyEntitySynced(entityType: OutboxEntityType, entityId: string, status: 'synced' | 'sync-error') {
   for (const listener of entitySyncListeners) {
     try {
       listener(entityType, entityId, status);
@@ -197,6 +197,204 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
       } else if (op.action === 'delete') {
         const { error } = await supabase
           .from('reminders')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'memory') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'user_memories'>;
+        const { error } = await supabase
+          .from('user_memories')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'user_memories'>;
+        const { error } = await supabase
+          .from('user_memories')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('user_memories')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'session') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'work_sessions'>;
+        const { error } = await supabase
+          .from('work_sessions')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'work_sessions'>;
+        const { error } = await supabase
+          .from('work_sessions')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('work_sessions')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'pet_setting') {
+      const payload = op.payload as TablesUpdate<'pet_settings'>;
+      // First attempt updating the existing companion settings row
+      const { data: updated, error: updateErr } = await supabase
+        .from('pet_settings')
+        .update(payload)
+        .eq('user_id', op.scope)
+        .select('id');
+
+      if (updateErr) {
+        if (isPermanentError(updateErr)) {
+          return { success: false, permanentError: updateErr.message };
+        }
+        return { success: false };
+      }
+
+      if (updated && updated.length > 0) {
+        return { success: true };
+      }
+
+      // If no row exists yet for this user, atomically upsert targeting user_id
+      const upsertPayload = { user_id: op.scope, ...payload } as TablesInsert<'pet_settings'>;
+      const { error: upsertErr } = await supabase
+        .from('pet_settings')
+        .upsert(upsertPayload, { onConflict: 'user_id' });
+
+      if (upsertErr) {
+        if (isPermanentError(upsertErr)) {
+          return { success: false, permanentError: upsertErr.message };
+        }
+        return { success: false };
+      }
+      return { success: true };
+    } else if (op.entityType === 'preference') {
+      const payload = op.payload as TablesUpdate<'user_preferences'>;
+      // First attempt updating the existing user preference row
+      const { data: updated, error: updateErr } = await supabase
+        .from('user_preferences')
+        .update(payload)
+        .eq('user_id', op.scope)
+        .select('id');
+
+      if (updateErr) {
+        if (isPermanentError(updateErr)) {
+          return { success: false, permanentError: updateErr.message };
+        }
+        return { success: false };
+      }
+
+      if (updated && updated.length > 0) {
+        return { success: true };
+      }
+
+      // If no row exists yet for this user, atomically upsert targeting user_id
+      const upsertPayload = { user_id: op.scope, ...payload } as TablesInsert<'user_preferences'>;
+      const { error: upsertErr } = await supabase
+        .from('user_preferences')
+        .upsert(upsertPayload, { onConflict: 'user_id' });
+
+      if (upsertErr) {
+        if (isPermanentError(upsertErr)) {
+          return { success: false, permanentError: upsertErr.message };
+        }
+        return { success: false };
+      }
+      return { success: true };
+    } else if (op.entityType === 'routine') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'routines'>;
+        const { error } = await supabase
+          .from('routines')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'routines'>;
+        const { error } = await supabase
+          .from('routines')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('routines')
           .delete()
           .eq('id', op.entityId)
           .eq('user_id', op.scope);

@@ -1426,6 +1426,157 @@ await test('45. Physical hardware poll transitions connection from awaiting_devi
   }
 });
 
+// =============================================================================
+// TEST SUITE: 13. Phase 8.9 ESP32-WROOM-32 & SSD1306 OLED Adaptation Verification
+// =============================================================================
+
+await test('46. platformio.ini defines ESP32-WROOM-32 OLED environment ([env:esp32_wroom_oled]) with board esp32dev, SSD1306 definitions, and I2C pins 21/22', () => {
+  const pioPath = path.resolve('firmware/platformio.ini');
+  assert.ok(fs.existsSync(pioPath), 'platformio.ini must exist');
+  const content = fs.readFileSync(pioPath, 'utf8');
+
+  assert.ok(content.includes('[env:esp32_wroom_oled]'), 'Must support ESP32-WROOM-32 OLED target');
+  assert.ok(content.includes('board = esp32dev'), 'Board must be esp32dev for ESP32-WROOM-32 DevKit V1');
+  assert.ok(content.includes('KURO_TARGET_ESP32_WROOM'), 'Build flag KURO_TARGET_ESP32_WROOM must be set');
+  assert.ok(content.includes('KURO_DISPLAY_SSD1306_OLED'), 'Build flag KURO_DISPLAY_SSD1306_OLED must be set');
+  assert.ok(content.includes('OLED_SCREEN_WIDTH=128'), 'OLED_SCREEN_WIDTH must be 128');
+  assert.ok(content.includes('OLED_SCREEN_HEIGHT=64'), 'OLED_SCREEN_HEIGHT must be 64');
+  assert.ok(content.includes('KURO_PIN_OLED_SDA=21'), 'KURO_PIN_OLED_SDA must be GPIO 21');
+  assert.ok(content.includes('KURO_PIN_OLED_SCL=22'), 'KURO_PIN_OLED_SCL must be GPIO 22');
+  assert.ok(content.includes('KURO_OLED_I2C_ADDR=0x3C'), 'KURO_OLED_I2C_ADDR must be 0x3C');
+});
+
+await test('47. ESP32-WROOM-32 hardware pin safeguards guard internal SPI flash (GPIO 6-11), strapping pins (0, 2, 5, 12, 15), and input-only pins (34-39)', () => {
+  const configPath = path.resolve('firmware/include/config.h');
+  assert.ok(fs.existsSync(configPath), 'config.h must exist');
+  const content = fs.readFileSync(configPath, 'utf8');
+
+  // Verify flash and strapping pin guard documentation
+  assert.ok(content.includes('GPIO 6, 7, 8, 9, 10, 11'), 'Must guard internal SPI flash GPIOs 6-11');
+  assert.ok(content.includes('GPIO 0, 2, 5, 12, 15'), 'Must guard strapping pins 0, 2, 5, 12, 15');
+  assert.ok(content.includes('GPIO 34, 35, 36, 39'), 'Must guard input-only pins 34, 35, 36, 39');
+
+  const FLASH_GPIOS = [6, 7, 8, 9, 10, 11];
+  const STRAPPING_GPIOS = [0, 2, 5, 12, 15];
+  const INPUT_ONLY_GPIOS = [34, 35, 36, 39];
+
+  const sdaMatch = content.match(/#define\s+KURO_PIN_OLED_SDA\s+(\d+)/);
+  const sclMatch = content.match(/#define\s+KURO_PIN_OLED_SCL\s+(\d+)/);
+  assert.ok(sdaMatch, 'KURO_PIN_OLED_SDA must be defined');
+  assert.ok(sclMatch, 'KURO_PIN_OLED_SCL must be defined');
+
+  const sdaPin = parseInt(sdaMatch[1], 10);
+  const sclPin = parseInt(sclMatch[1], 10);
+
+  assert.ok(!FLASH_GPIOS.includes(sdaPin), `SDA (GPIO ${sdaPin}) must not collide with flash pins`);
+  assert.ok(!FLASH_GPIOS.includes(sclPin), `SCL (GPIO ${sclPin}) must not collide with flash pins`);
+  assert.ok(!STRAPPING_GPIOS.includes(sdaPin), `SDA (GPIO ${sdaPin}) must not collide with strapping pins`);
+  assert.ok(!STRAPPING_GPIOS.includes(sclPin), `SCL (GPIO ${sclPin}) must not collide with strapping pins`);
+  assert.ok(!INPUT_ONLY_GPIOS.includes(sdaPin), `SDA (GPIO ${sdaPin}) must not collide with input-only pins`);
+  assert.ok(!INPUT_ONLY_GPIOS.includes(sclPin), `SCL (GPIO ${sclPin}) must not collide with input-only pins`);
+  assert.equal(sdaPin, 21, 'Default hardware I2C SDA must be GPIO 21');
+  assert.equal(sclPin, 22, 'Default hardware I2C SCL must be GPIO 22');
+});
+
+await test('48. OLED 128x64 display geometry math maintains balanced inter-ocular spacing (28px), edge margins (26px), and mouth alignment', () => {
+  const fePath = path.resolve('firmware/src/face_engine.h');
+  const content = fs.readFileSync(fePath, 'utf8');
+
+  assert.ok(content.includes('EYE_LEFT_X = 38'), 'OLED EYE_LEFT_X must be 38');
+  assert.ok(content.includes('EYE_RIGHT_X = 90'), 'OLED EYE_RIGHT_X must be 90');
+  assert.ok(content.includes('EYE_BASE_Y = 32'), 'OLED EYE_BASE_Y must be 32');
+  assert.ok(content.includes('EYE_WIDTH = 24'), 'OLED EYE_WIDTH must be 24');
+  assert.ok(content.includes('EYE_HEIGHT = 26'), 'OLED EYE_HEIGHT must be 26');
+  assert.ok(content.includes('MOUTH_X = 64'), 'OLED MOUTH_X must be 64 (midpoint)');
+  assert.ok(content.includes('MOUTH_BASE_Y = 53'), 'OLED MOUTH_BASE_Y must be 53');
+
+  const eyeLeftX = 38;
+  const eyeRightX = 90;
+  const eyeW = 24;
+  const screenW = 128;
+
+  const leftEyeStart = eyeLeftX - (eyeW / 2); // 26
+  const leftEyeEnd = eyeLeftX + (eyeW / 2);   // 50
+  const rightEyeStart = eyeRightX - (eyeW / 2); // 78
+  const rightEyeEnd = eyeRightX + (eyeW / 2);   // 102
+
+  const leftMargin = leftEyeStart; // 26
+  const rightMargin = screenW - rightEyeEnd; // 26
+  const interOcular = rightEyeStart - leftEyeEnd; // 28
+
+  assert.equal(leftMargin, 26, 'Left eye margin must be 26px');
+  assert.equal(rightMargin, 26, 'Right eye margin must be 26px for perfect symmetry');
+  assert.equal(leftMargin, rightMargin, 'Horizontal layout must be symmetrically balanced');
+  assert.equal(interOcular, 28, 'Inter-ocular spacing must be 28px');
+});
+
+await test('49. OLED procedural eyelid math scales smooth blinking between 2px minimum slit and 26px open squircle', () => {
+  const EYE_HEIGHT_OLED = 26;
+  const BLINK_DURATION = 160;
+  const minSlit = 2;
+
+  function calculateBlinkHeight(elapsedMs) {
+    if (elapsedMs < BLINK_DURATION / 2) {
+      const progress = elapsedMs / (BLINK_DURATION / 2);
+      let h = Math.round(EYE_HEIGHT_OLED * (1.0 - progress));
+      if (h < minSlit) h = minSlit;
+      return h;
+    } else if (elapsedMs < BLINK_DURATION) {
+      const progress = (elapsedMs - BLINK_DURATION / 2) / (BLINK_DURATION / 2);
+      let h = Math.round(EYE_HEIGHT_OLED * progress);
+      if (h > EYE_HEIGHT_OLED) h = EYE_HEIGHT_OLED;
+      if (h < minSlit) h = minSlit;
+      return h;
+    }
+    return EYE_HEIGHT_OLED;
+  }
+
+  assert.equal(calculateBlinkHeight(0), 26, 'Blink start is full open (26px)');
+  assert.equal(calculateBlinkHeight(80), 2, 'Blink apex is closed slit (2px)');
+  assert.equal(calculateBlinkHeight(160), 26, 'Blink complete returns to full open (26px)');
+
+  // Verify monotonicity during closing
+  let prevH = 26;
+  for (let t = 0; t <= 80; t += 10) {
+    const h = calculateBlinkHeight(t);
+    assert.ok(h <= prevH, `Lid height must monotonically decrease during closing: t=${t}, h=${h}, prev=${prevH}`);
+    assert.ok(h >= minSlit, `Lid height must never go below ${minSlit}px slit`);
+    prevH = h;
+  }
+
+  // Verify monotonicity during opening
+  prevH = 2;
+  for (let t = 80; t <= 160; t += 10) {
+    const h = calculateBlinkHeight(t);
+    assert.ok(h >= prevH, `Lid height must monotonically increase during opening: t=${t}, h=${h}, prev=${prevH}`);
+    assert.ok(h <= EYE_HEIGHT_OLED, `Lid height must never exceed ${EYE_HEIGHT_OLED}px`);
+    prevH = h;
+  }
+});
+
+await test('50. Kuro emotion model maps all 17 moods identically across both TFT and OLED firmware targets', () => {
+  const feCppPath = path.resolve('firmware/src/face_engine.cpp');
+  const protoCppPath = path.resolve('firmware/src/protocol.cpp');
+  assert.ok(fs.existsSync(feCppPath), 'face_engine.cpp must exist');
+  assert.ok(fs.existsSync(protoCppPath), 'protocol.cpp must exist');
+
+  const feContent = fs.readFileSync(feCppPath, 'utf8');
+  const protoContent = fs.readFileSync(protoCppPath, 'utf8');
+
+  // Verify all 17 moods are recognized in firmware protocol whitelist
+  for (const mood of ALLOWED_MOODS) {
+    assert.ok(protoContent.includes(`"${mood}"`), `KuroProtocol must include mood in ALLOWED_MOODS whitelist: ${mood}`);
+    const mouth = mapMoodToDefaultMouth(mood);
+    assert.ok(mouth && mouth.startsWith('MOUTH_'), `Mood ${mood} must map to a valid mouth geometry`);
+  }
+
+  // Verify OLED specific mouth and eye rendering branches exist
+  assert.ok(feContent.includes('KURO_DISPLAY_SSD1306_OLED'), 'FaceEngine must contain OLED conditional rendering');
+  assert.ok(feContent.includes('EYE_WIDTH'), 'FaceEngine must reference EYE_WIDTH layout constant');
+  assert.ok(feContent.includes('MOUTH_WIDTH'), 'FaceEngine must reference MOUTH_WIDTH layout constant');
+  assert.ok(feContent.includes('renderStatusBar'), 'FaceEngine must implement renderStatusBar for both displays');
+});
+
 // -----------------------------------------------------------------------------
 // Summary
 // -----------------------------------------------------------------------------

@@ -212,10 +212,10 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
               Windows Desktop Companion
             </h3>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-              Local Loopback Service (127.0.0.1:48199)
+              Local Loopback Service (127.0.0.1:48299 / 48199)
             </span>
             <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Detects active IDE workspace titles (Antigravity, VS Code, Visual Studio, Cursor) and records focus intervals without collecting code, keystrokes, or telemetry.
+              Detects active IDE workspace titles (Antigravity, VS Code, Visual Studio, Cursor, Windsurf, JetBrains) and records focus intervals without collecting code, keystrokes, or telemetry.
             </p>
           </div>
 
@@ -232,11 +232,11 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
                   status: companionStatus,
                   statusLabel: companionStatusLabel,
                   description:
-                    'Runs locally on Windows (Node.js or Python) and binds strictly to 127.0.0.1. Communicates via Bearer session token authentication.',
+                    'Runs locally on Windows (Node.js or Python) and binds strictly to 127.0.0.1. Communicates via Bearer session token and 6-digit Pairing PIN authentication.',
                   setupPrerequisites: [
-                    'Run companion/start-companion.bat on your Windows PC.',
-                    'Copy the 32-character pairing token displayed in the console.',
-                    'Paste token into Settings -> Desktop Companion to establish trusted bridge.',
+                    'Install or run Kuro Desktop Companion on your Windows PC (port 48299).',
+                    'Copy the 6-digit Pairing PIN or 32-character token displayed in the console.',
+                    'Paste PIN into Settings -> Desktop Companion to establish trusted bridge.',
                   ],
                   privacyNotes:
                     'Zero telemetry. Process names and safe window title project labels are stored in local .sessions_history.json. Zero network egress.',

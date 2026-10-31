@@ -3,7 +3,8 @@ import type { ClientPetSettings } from '../lib/adapters';
 import { petSettingsRowToClient, petSettingsToUpdatePayload } from '../lib/adapters';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
-import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
+import { getOfflineCacheItem, setOfflineCacheItem, enqueueOutboxOperation } from '../lib/offlineDb';
+import { processOutbox } from '../lib/syncEngine';
 import { DEFAULT_DOCUMENTED_PET_SETTINGS } from '../lib/pet/faceLifecycle';
 
 export const defaultPetSettings: ClientPetSettings = DEFAULT_DOCUMENTED_PET_SETTINGS;
@@ -12,7 +13,7 @@ function loadDemoPetSettings(): ClientPetSettings {
   try {
     const raw = localStorage.getItem('kuro_demo_pet_settings');
     if (raw) {
-      return JSON.parse(raw);
+      return { ...DEFAULT_DOCUMENTED_PET_SETTINGS, ...JSON.parse(raw) };
     }
   } catch {}
   return defaultPetSettings;
@@ -48,8 +49,9 @@ export function usePetSettings(): UsePetSettingsReturn {
     setError(null);
 
     // 1. Instant offline load from local IndexedDB cache
+    let cached: ClientPetSettings | null = null;
     try {
-      const cached = await getOfflineCacheItem<ClientPetSettings>(userId, 'pet_settings');
+      cached = await getOfflineCacheItem<ClientPetSettings>(userId, 'pet_settings');
       if (cached && currentSeq === sequenceRef.current) {
         setDbSettings(cached);
         setDbUserId(userId);
@@ -76,10 +78,15 @@ export function usePetSettings(): UsePetSettingsReturn {
       }
 
       if (data) {
-        const clientSettings = petSettingsRowToClient(data);
-        setDbSettings(clientSettings);
+        const serverSettings = petSettingsRowToClient(data);
+        const mergedSettings: ClientPetSettings = {
+          ...DEFAULT_DOCUMENTED_PET_SETTINGS,
+          ...(cached || {}),
+          ...serverSettings,
+        };
+        setDbSettings(mergedSettings);
         setDbUserId(userId);
-        void setOfflineCacheItem(userId, 'pet_settings', clientSettings);
+        void setOfflineCacheItem(userId, 'pet_settings', mergedSettings);
       } else {
         // If no settings row exists yet for this user, insert default row
         const insertPayload = {
@@ -88,19 +95,27 @@ export function usePetSettings(): UsePetSettingsReturn {
         };
         const { data: created, error: createErr } = await supabase
           .from('pet_settings')
-          .insert(insertPayload)
+          .upsert(insertPayload, { onConflict: 'user_id' })
           .select('*')
           .single();
 
         if (currentSeq !== sequenceRef.current) return;
 
         if (!createErr && created) {
-          const clientSettings = petSettingsRowToClient(created);
-          setDbSettings(clientSettings);
+          const serverSettings = petSettingsRowToClient(created);
+          const mergedSettings: ClientPetSettings = {
+            ...DEFAULT_DOCUMENTED_PET_SETTINGS,
+            ...(cached || {}),
+            ...serverSettings,
+          };
+          setDbSettings(mergedSettings);
           setDbUserId(userId);
-          void setOfflineCacheItem(userId, 'pet_settings', clientSettings);
+          void setOfflineCacheItem(userId, 'pet_settings', mergedSettings);
         } else {
-          setDbSettings(defaultPetSettings);
+          setDbSettings({
+            ...DEFAULT_DOCUMENTED_PET_SETTINGS,
+            ...(cached || {}),
+          });
         }
       }
       setDbUserId(userId);
@@ -159,8 +174,7 @@ export function usePetSettings(): UsePetSettingsReturn {
         return true;
       }
 
-      // Authenticated persistence with optimistic update & rollback
-      const previous = dbSettings;
+      // Authenticated persistence with durable local-first optimistic update & outbox sync
       const updated = { ...dbSettings, ...partial };
       setDbSettings(updated);
       void setOfflineCacheItem(user.id, 'pet_settings', updated);
@@ -168,23 +182,24 @@ export function usePetSettings(): UsePetSettingsReturn {
 
       try {
         const payload = petSettingsToUpdatePayload(partial);
-        const { error: updateErr } = await supabase
-          .from('pet_settings')
-          .update(payload)
-          .eq('user_id', user.id);
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'pet_setting',
+          entityId: user.id,
+          action: 'update',
+          payload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        });
 
-        if (updateErr) {
-          setDbSettings(previous);
-          void setOfflineCacheItem(user.id, 'pet_settings', previous);
-          setError(updateErr.message || 'Failed to save companion settings.');
-          return false;
-        }
-
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setDbSettings(previous);
-        void setOfflineCacheItem(user.id, 'pet_settings', previous);
-        setError('Network offline. Companion settings could not be saved to server.');
+      } catch (err) {
+        console.warn('[usePetSettings] Error saving companion settings:', err);
+        setError('Failed to queue companion settings locally.');
         return false;
       } finally {
         setSaving(false);

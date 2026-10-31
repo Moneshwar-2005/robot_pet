@@ -73,7 +73,9 @@ export interface Database {
           avatar_variant: string;
           eye_shape: 'curved' | 'round' | 'pixel';
           glow_color: 'cyan' | 'emerald' | 'amber' | 'violet';
+          /** PostgreSQL integer percentage (0-100) */
           playfulness: number;
+          /** PostgreSQL integer percentage (0-100) */
           focus_discipline: number;
           created_at: string;
           updated_at: string;
@@ -85,7 +87,9 @@ export interface Database {
           avatar_variant?: string;
           eye_shape?: 'curved' | 'round' | 'pixel';
           glow_color?: 'cyan' | 'emerald' | 'amber' | 'violet';
+          /** PostgreSQL integer percentage (0-100) */
           playfulness?: number;
+          /** PostgreSQL integer percentage (0-100) */
           focus_discipline?: number;
           created_at?: string;
           updated_at?: string;
@@ -97,7 +101,9 @@ export interface Database {
           avatar_variant?: string;
           eye_shape?: 'curved' | 'round' | 'pixel';
           glow_color?: 'cyan' | 'emerald' | 'amber' | 'violet';
+          /** PostgreSQL integer percentage (0-100) */
           playfulness?: number;
+          /** PostgreSQL integer percentage (0-100) */
           focus_discipline?: number;
           created_at?: string;
           updated_at?: string;

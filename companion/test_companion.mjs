@@ -39,6 +39,8 @@ import {
   savePersistedSessions,
   extractAuthToken,
   verifyToken,
+  verifyPin,
+  checkRateLimit,
   isOriginAllowed,
 } from './server.mjs';
 
@@ -92,12 +94,17 @@ async function runTestSuite() {
   });
 
   let serverSessionToken = null;
+  let serverPairingPin = null;
   let exitCleanly = false;
 
   const tokenPromise = new Promise((resolve, reject) => {
     let captured = '';
     serverProc.stdout.on('data', (chunk) => {
       captured += chunk.toString();
+      const pinMatch = captured.match(/Pairing PIN:\s+(\d{6})/);
+      if (pinMatch) {
+        serverPairingPin = pinMatch[1];
+      }
       const match = captured.match(/Pairing Token:\s+([a-f0-9]{32})/);
       if (match) {
         serverSessionToken = match[1];
@@ -184,6 +191,26 @@ async function runTestSuite() {
     assert(goodPairRes.status === 200, 'POST /api/pair with valid token returns 200 OK');
     assert(goodPairRes.body.paired === true, 'Pairing response confirms paired: true');
 
+    // 6b. Pairing with valid 6-digit PIN
+    const savedPin = fs.readFileSync(path.join(__dirname, '.session_pin'), 'utf-8').trim();
+    assert(/^\d{6}$/.test(savedPin), 'Saved PIN is a 6-digit numeric string');
+    assert(serverPairingPin === savedPin, 'Captured stdout PIN matches saved session PIN');
+
+    const goodPinPairRes = await request(
+      { path: '/api/pair', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      { pin: savedPin }
+    );
+    assert(goodPinPairRes.status === 200, 'POST /api/pair with valid 6-digit PIN returns 200 OK');
+    assert(goodPinPairRes.body.paired === true, 'PIN pairing confirms paired: true');
+    assert(goodPinPairRes.body.token === serverSessionToken, 'PIN pairing returns authenticated session token');
+
+    // 6c. Pairing with invalid 6-digit PIN
+    const badPinPairRes = await request(
+      { path: '/api/pair', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      { pin: '000000' }
+    );
+    assert(badPinPairRes.status === 401, 'POST /api/pair with wrong PIN returns 401 Unauthorized');
+
     // 7. Origin validation
     const evilOriginRes = await request({
       path: '/api/health',
@@ -236,6 +263,26 @@ async function runTestSuite() {
     assert(
       extractProjectFromTitle('sublime', 'script.py - data-pipeline - Sublime Text') === 'data-pipeline',
       'extractProjectFromTitle extracts Sublime Text project correctly'
+    );
+    assert(
+      extractProjectFromTitle('windsurf', 'server.ts - kuro-companion - Windsurf') === 'kuro-companion',
+      'extractProjectFromTitle extracts Windsurf workspace project correctly'
+    );
+    assert(
+      extractProjectFromTitle('zed', 'smart-pet-assistant — App.tsx') === 'smart-pet-assistant',
+      'extractProjectFromTitle extracts Zed editor workspace project correctly'
+    );
+    assert(
+      extractProjectFromTitle('clion', 'firmware-esp32 [C:\\projects\\firmware]') === 'firmware-esp32',
+      'extractProjectFromTitle extracts CLion project correctly'
+    );
+    assert(
+      extractProjectFromTitle('rider', 'GameClient [C:\\unity\\GameClient]') === 'GameClient',
+      'extractProjectFromTitle extracts Rider project correctly'
+    );
+    assert(
+      extractProjectFromTitle('androidstudio', 'KuroMobileApp [C:\\android\\app]') === 'KuroMobileApp',
+      'extractProjectFromTitle extracts Android Studio project correctly'
     );
     assert(
       extractProjectFromTitle('vscode', 'N/A') === null &&
@@ -500,6 +547,12 @@ async function runTestSuite() {
     assert(isOriginAllowed('http://malicious-site.com') === false, 'isOriginAllowed rejects untrusted origins');
     assert(verifyToken(serverSessionToken, serverSessionToken) === true, 'verifyToken validates identical token');
     assert(verifyToken('wrong-token', serverSessionToken) === false, 'verifyToken rejects wrong token');
+    assert(verifyPin('123456', '123456') === true, 'verifyPin validates identical 6-digit PIN');
+    assert(verifyPin('654321', '123456') === false, 'verifyPin rejects wrong PIN');
+    assert(checkRateLimit('127.0.0.1', 'test-endpoint', 3, 10000) === true, 'checkRateLimit allows within limit');
+    assert(checkRateLimit('127.0.0.1', 'test-endpoint', 3, 10000) === true, 'checkRateLimit tracks hit 2');
+    assert(checkRateLimit('127.0.0.1', 'test-endpoint', 3, 10000) === true, 'checkRateLimit tracks hit 3');
+    assert(checkRateLimit('127.0.0.1', 'test-endpoint', 3, 10000) === false, 'checkRateLimit rejects when limit exceeded');
 
     // 22. Shutdown security: invalid token returns 401 and DOES NOT terminate server
     const badShutdownRes = await request({

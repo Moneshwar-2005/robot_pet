@@ -8,7 +8,14 @@ export type SyncStatus = 'local-only' | 'pending-sync' | 'synced' | 'sync-error'
 
 export type OutboxAction = 'create' | 'update' | 'delete';
 
-export type OutboxEntityType = 'task' | 'reminder';
+export type OutboxEntityType =
+  | 'task'
+  | 'reminder'
+  | 'memory'
+  | 'session'
+  | 'pet_setting'
+  | 'preference'
+  | 'routine';
 
 export type OutboxStatus = 'pending' | 'processing' | 'failed';
 

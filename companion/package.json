@@ -1,0 +1,24 @@
+{
+  "name": "kuro-desktop-companion",
+  "version": "1.3.0",
+  "description": "Kuro Windows Desktop Companion Service - Privacy-respecting loopback bridge for IDE work session tracking",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test_companion.mjs"
+  },
+  "keywords": [
+    "kuro",
+    "desktop-companion",
+    "ide-tracking",
+    "windows",
+    "privacy-first"
+  ],
+  "author": "Kuro Project",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

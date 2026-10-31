@@ -33,9 +33,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration
-export const COMPANION_PORT = parseInt(process.env.KURO_COMPANION_PORT || '48199', 10);
+export const COMPANION_PRIMARY_PORT = 48299;
+export const COMPANION_FALLBACK_PORT = 48199;
+export const COMPANION_PORT = parseInt(process.env.KURO_COMPANION_PORT || String(COMPANION_PRIMARY_PORT), 10);
 export const COMPANION_HOST = '127.0.0.1';
-export const COMPANION_VERSION = '1.2.0';
+export const COMPANION_VERSION = '1.3.0';
 export const MAX_BODY_BYTES = 64 * 1024; // 64 KB limit
 export const DEFAULT_SESSIONS_STORAGE_FILE = path.join(__dirname, '.sessions_history.json');
 
@@ -60,16 +62,25 @@ export const SUPPORTED_IDES = [
   { id: 'vscode', name: 'Visual Studio Code', exe: 'Code.exe' },
   { id: 'visualstudio', name: 'Visual Studio', exe: 'devenv.exe' },
   { id: 'cursor', name: 'Cursor', exe: 'Cursor.exe' },
+  { id: 'windsurf', name: 'Windsurf', exe: 'Windsurf.exe' },
+  { id: 'zed', name: 'Zed', exe: 'zed.exe' },
   { id: 'idea', name: 'IntelliJ IDEA', exe: 'idea64.exe' },
   { id: 'pycharm', name: 'PyCharm', exe: 'pycharm64.exe' },
   { id: 'webstorm', name: 'WebStorm', exe: 'webstorm64.exe' },
+  { id: 'clion', name: 'CLion', exe: 'clion64.exe' },
+  { id: 'rider', name: 'Rider', exe: 'rider64.exe' },
+  { id: 'androidstudio', name: 'Android Studio', exe: 'studio64.exe' },
   { id: 'sublime', name: 'Sublime Text', exe: 'sublime_text.exe' },
 ];
 
-// Session Token Generation & Storage
+// Session Token & 6-Digit Pairing PIN Generation & Storage
 const TOKEN_FILE_PATH = path.join(__dirname, '.session_token');
+const PIN_FILE_PATH = path.join(__dirname, '.session_pin');
+const PID_FILE_PATH = path.join(__dirname, 'kuro-companion.pid');
 const sessionStartedAt = new Date().toISOString();
 export const sessionToken = crypto.randomBytes(16).toString('hex'); // 32 chars hex
+export const pairingPin = (crypto.randomInt ? crypto.randomInt(100000, 999999) : Math.floor(100000 + Math.random() * 900000)).toString();
+export let sessionExpiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours TTL
 
 // Active browser tab state reported by companion extension
 let currentBrowserTab = {
@@ -78,22 +89,25 @@ let currentBrowserTab = {
   timestamp: 0,
 };
 
-// Persist token to companion/.session_token with restricted user-only permissions
+// Persist token and pin with restricted user-only permissions
 try {
   fs.writeFileSync(TOKEN_FILE_PATH, sessionToken, { mode: 0o600, encoding: 'utf-8' });
+  fs.writeFileSync(PIN_FILE_PATH, pairingPin, { mode: 0o600, encoding: 'utf-8' });
 } catch (err) {
-  console.warn('[Kuro Companion] Note: Could not write .session_token file:', err.message);
+  console.warn('[Kuro Companion] Note: Could not write token/pin files:', err.message);
 }
 
-// Cleanup token file on exit
-function cleanupTokenFile() {
+// Cleanup credentials on exit
+export function cleanupTokenFile() {
   try {
-    if (fs.existsSync(TOKEN_FILE_PATH)) {
-      fs.unlinkSync(TOKEN_FILE_PATH);
-    }
-  } catch {
-    // ignore cleanup errors
-  }
+    if (fs.existsSync(TOKEN_FILE_PATH)) fs.unlinkSync(TOKEN_FILE_PATH);
+  } catch { /* ignore */ }
+  try {
+    if (fs.existsSync(PIN_FILE_PATH)) fs.unlinkSync(PIN_FILE_PATH);
+  } catch { /* ignore */ }
+  try {
+    if (fs.existsSync(PID_FILE_PATH)) fs.unlinkSync(PID_FILE_PATH);
+  } catch { /* ignore */ }
 }
 
 process.on('exit', cleanupTokenFile);
@@ -125,13 +139,74 @@ export function extractAuthToken(req) {
   return null;
 }
 
-// Helper: Timing-safe token comparison
+// Rate Limiting & Brute Force Protection
+const rateLimitMap = new Map();
+const failedPinAttempts = new Map();
+
+export function checkRateLimit(ip, endpoint, maxRequests, windowMs) {
+  const now = Date.now();
+  const key = `${ip}:${endpoint}`;
+  let record = rateLimitMap.get(key);
+  if (!record || now > record.resetAt) {
+    record = { count: 1, resetAt: now + windowMs };
+    rateLimitMap.set(key, record);
+    return true;
+  }
+  if (record.count >= maxRequests) {
+    return false;
+  }
+  record.count++;
+  return true;
+}
+
+export function isPinLocked(ip) {
+  const now = Date.now();
+  const record = failedPinAttempts.get(ip);
+  if (record && record.lockedUntil && now < record.lockedUntil) {
+    return true;
+  }
+  return false;
+}
+
+export function recordFailedPinAttempt(ip) {
+  const now = Date.now();
+  let record = failedPinAttempts.get(ip);
+  if (!record || now > record.resetAt) {
+    record = { count: 1, resetAt: now + 60000, lockedUntil: 0 };
+  } else {
+    record.count++;
+  }
+  if (record.count >= 5) {
+    record.lockedUntil = now + 60000; // 60s lock
+  }
+  failedPinAttempts.set(ip, record);
+}
+
+export function clearFailedPinAttempts(ip) {
+  failedPinAttempts.delete(ip);
+}
+
+// Helper: Timing-safe token comparison with expiry check
 export function verifyToken(token, expectedToken = sessionToken) {
   if (!token || typeof token !== 'string') return false;
   if (!expectedToken || typeof expectedToken !== 'string') return false;
+  if (Date.now() > sessionExpiresAt) return false;
   if (token.length !== expectedToken.length) return false;
   try {
     return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken));
+  } catch {
+    return false;
+  }
+}
+
+// Helper: Timing-safe PIN comparison with expiry check
+export function verifyPin(pin, expectedPin = pairingPin) {
+  if (!pin || typeof pin !== 'string') return false;
+  if (!expectedPin || typeof expectedPin !== 'string') return false;
+  if (Date.now() > sessionExpiresAt) return false;
+  if (pin.length !== expectedPin.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(pin), Buffer.from(expectedPin));
   } catch {
     return false;
   }
@@ -265,7 +340,39 @@ export function extractProjectFromTitle(ideId, rawTitle) {
     return null;
   }
 
-  if (ideId === 'idea' || ideId === 'pycharm' || ideId === 'webstorm') {
+  if (ideId === 'windsurf') {
+    // Format: "file.ext - project-name - Windsurf" or "project-name - Windsurf"
+    const suffix = ' - Windsurf';
+    if (title.endsWith(suffix)) {
+      const rest = title.slice(0, -suffix.length).trim();
+      const parts = rest.split(' - ');
+      const candidate = parts[parts.length - 1]?.trim();
+      return candidate && candidate !== 'Welcome' ? candidate : null;
+    }
+    return null;
+  }
+
+  if (ideId === 'zed') {
+    // Format: "project-name — file.ext" or "project-name - Zed"
+    if (title.includes(' — ')) {
+      const parts = title.split(' — ');
+      return parts[0]?.trim() || null;
+    }
+    const suffix = ' - Zed';
+    if (title.endsWith(suffix)) {
+      return title.slice(0, -suffix.length).trim() || null;
+    }
+    return null;
+  }
+
+  if (
+    ideId === 'idea' ||
+    ideId === 'pycharm' ||
+    ideId === 'webstorm' ||
+    ideId === 'clion' ||
+    ideId === 'rider' ||
+    ideId === 'androidstudio'
+  ) {
     // Format: "project-name – [file.ext]" or "project-name [C:\path]"
     const bracketIdx = title.indexOf('[');
     if (bracketIdx > 0) {
@@ -632,6 +739,10 @@ export const server = http.createServer(async (req, res) => {
 
   // Route 1: Health Check (Unauthenticated, Minimal Info)
   if (req.method === 'GET' && (pathname === '/api/health' || pathname === '/')) {
+    const clientIp = req.socket.remoteAddress || '127.0.0.1';
+    if (!checkRateLimit(clientIp, '/api/health', 120, 60000)) {
+      return sendJson(res, 429, { error: 'Rate limit exceeded' }, origin);
+    }
     return sendJson(
       res,
       200,
@@ -640,12 +751,15 @@ export const server = http.createServer(async (req, res) => {
         service: 'kuro-desktop-companion',
         version: COMPANION_VERSION,
         platform: os.platform(),
+        port: activePort || COMPANION_PORT,
         state: 'running',
         requiresAuth: true,
         capabilities: {
           healthCheck: true,
           ideTracking: true,
-          persistentSessions: true, // Step 4.3
+          persistentSessions: true,
+          pairingPin: true,
+          portFallback: true,
         },
       },
       origin
@@ -679,14 +793,18 @@ export const server = http.createServer(async (req, res) => {
         service: 'kuro-desktop-companion',
         version: COMPANION_VERSION,
         platform: os.platform(),
+        port: activePort || COMPANION_PORT,
         state: 'running',
         authenticated: true,
         sessionStartedAt,
+        sessionExpiresAt: new Date(sessionExpiresAt).toISOString(),
         uptimeSeconds,
         capabilities: {
           healthCheck: true,
           ideTracking: true,
           persistentSessions: true,
+          pairingPin: true,
+          portFallback: true,
         },
         tracking: activityTracker.getStatus(),
       },
@@ -694,8 +812,22 @@ export const server = http.createServer(async (req, res) => {
     );
   }
 
-  // Route 3: Pairing Handshake (POST /api/pair with {"token": "..."})
+  // Route 3: Pairing Handshake (POST /api/pair with {"token": "..."} or {"pin": "..."})
   if (req.method === 'POST' && pathname === '/api/pair') {
+    const rawIp = req.socket.remoteAddress || '127.0.0.1';
+    const clientIp = rawIp.replace(/^::ffff:/, '');
+    if (!checkRateLimit(clientIp, '/api/pair', 20, 60000)) {
+      return sendJson(
+        res,
+        429,
+        {
+          status: 'error',
+          error: 'Too Many Requests: Rate limit exceeded on pairing endpoint. Please wait 60 seconds.',
+        },
+        origin
+      );
+    }
+
     let body;
     try {
       body = await readJsonBody(req);
@@ -706,14 +838,62 @@ export const server = http.createServer(async (req, res) => {
       return sendJson(res, 400, { error: 'Bad Request: Malformed JSON' }, origin);
     }
 
-    const candidateToken = body.token || extractAuthToken(req);
-    if (!verifyToken(candidateToken)) {
+    const candidatePin = body.pin ? String(body.pin).trim() : null;
+    const candidateToken = body.token ? String(body.token).trim() : extractAuthToken(req);
+
+    // If pairing via 6-digit PIN
+    if (candidatePin) {
+      if (isPinLocked(clientIp)) {
+        return sendJson(
+          res,
+          429,
+          {
+            status: 'error',
+            error: 'Too Many Requests: Maximum PIN attempts exceeded. Temporarily locked for 60 seconds.',
+          },
+          origin
+        );
+      }
+
+      if (!verifyPin(candidatePin)) {
+        recordFailedPinAttempt(clientIp);
+        return sendJson(
+          res,
+          401,
+          {
+            status: 'error',
+            error: 'Unauthorized: Invalid pairing PIN.',
+          },
+          origin
+        );
+      }
+
+      // Valid PIN
+      clearFailedPinAttempts(clientIp);
+      return sendJson(
+        res,
+        200,
+        {
+          status: 'ok',
+          paired: true,
+          service: 'kuro-desktop-companion',
+          version: COMPANION_VERSION,
+          token: sessionToken,
+          expiresIn: Math.max(0, Math.round((sessionExpiresAt - Date.now()) / 1000)),
+          message: 'Successfully paired with Kuro Desktop Companion via PIN.',
+        },
+        origin
+      );
+    }
+
+    // Pairing via Token
+    if (!candidateToken || !verifyToken(candidateToken)) {
       return sendJson(
         res,
         401,
         {
           status: 'error',
-          error: 'Unauthorized: Pairing token does not match active companion session',
+          error: 'Unauthorized: Pairing token does not match active companion session or has expired',
         },
         origin
       );
@@ -727,6 +907,7 @@ export const server = http.createServer(async (req, res) => {
         paired: true,
         service: 'kuro-desktop-companion',
         version: COMPANION_VERSION,
+        token: sessionToken,
         message: 'Successfully paired with Kuro Desktop Companion.',
       },
       origin
@@ -924,19 +1105,49 @@ export const server = http.createServer(async (req, res) => {
   return sendJson(res, 404, { status: 'error', error: 'Endpoint Not Found' }, origin);
 });
 
-// Start Server if invoked directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  server.listen(COMPANION_PORT, COMPANION_HOST, () => {
+export let activePort = COMPANION_PORT;
+
+export function startCompanionServer(preferredPort = COMPANION_PORT, host = COMPANION_HOST) {
+  activePort = preferredPort;
+
+  // Persist PID for service management
+  try {
+    fs.writeFileSync(PID_FILE_PATH, String(process.pid), { encoding: 'utf-8', mode: 0o600 });
+  } catch {
+    // ignore
+  }
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      if (activePort === COMPANION_PRIMARY_PORT) {
+        console.warn(`[Kuro Companion] Primary port ${COMPANION_PRIMARY_PORT} in use. Attempting fallback port ${COMPANION_FALLBACK_PORT}...`);
+        activePort = COMPANION_FALLBACK_PORT;
+        server.listen(activePort, host);
+        return;
+      }
+      console.error(`[Kuro Companion] Error: Port ${activePort} is already in use.`);
+      process.exit(1);
+    } else {
+      console.error('[Kuro Companion] Server startup error:', err);
+      process.exit(1);
+    }
+  });
+
+  server.listen(activePort, host, () => {
     console.log('==============================================================');
     console.log(`KURO WINDOWS DESKTOP COMPANION — FOUNDATION SERVICE (v${COMPANION_VERSION})`);
     console.log('==============================================================');
-    console.log(`Binding:   http://${COMPANION_HOST}:${COMPANION_PORT}`);
-    console.log('Access:    Strict Loopback Only (127.0.0.1)');
-    console.log(`Platforms: Windows (${os.platform()})`);
+    console.log(`Binding:       http://${host}:${activePort}`);
+    console.log('Access:        Strict Loopback Only (127.0.0.1)');
+    console.log(`Platforms:     Windows (${os.platform()})`);
+    console.log(`PID:           ${process.pid}`);
     console.log('--------------------------------------------------------------');
     console.log('SECURITY & PAIRING:');
+    console.log(`Pairing PIN:   ${pairingPin} (6-digit numeric)`);
     console.log(`Pairing Token: ${sessionToken}`);
     console.log(`Saved Token:   ${TOKEN_FILE_PATH}`);
+    console.log(`Saved PIN:     ${PIN_FILE_PATH}`);
+    console.log(`Expires In:    24 hours`);
     console.log('Allowed Origins:');
     ALLOWED_ORIGINS.forEach((o) => console.log(` - ${o}`));
     console.log('--------------------------------------------------------------');
@@ -944,4 +1155,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log('Press Ctrl+C to stop companion.');
     console.log('==============================================================');
   });
+}
+
+// Start Server if invoked directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startCompanionServer();
 }

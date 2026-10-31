@@ -4,7 +4,8 @@ import { memoryRowToClient, memoryToInsertPayload } from '../lib/adapters';
 import { sampleMemoryItems } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
-import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
+import { getOfflineCacheItem, setOfflineCacheItem, enqueueOutboxOperation, getOutboxOperationsForScope } from '../lib/offlineDb';
+import { processOutbox } from '../lib/syncEngine';
 
 export const initialMemories: ClientMemory[] = sampleMemoryItems.map((m, idx) => ({
   id: m.id,
@@ -43,51 +44,115 @@ export function useMemories(): UseMemoriesReturn {
   }, [user, dbUserId, dbMemories, demoMemories]);
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
-  const fetchMemories = useCallback(async (userId: string) => {
-    const currentSeq = ++sequenceRef.current;
-    setError(null);
+  // Reconcile server memories with pending local outbox operations
+  const reconcileMemories = useCallback(
+    async (userId: string, serverMemories: ClientMemory[]): Promise<ClientMemory[]> => {
+      try {
+        const ops = await getOutboxOperationsForScope(userId);
+        const memoryOps = ops.filter((o) => o.entityType === 'memory');
+        if (memoryOps.length === 0) return serverMemories;
 
-    // 1. Instant offline load from local IndexedDB cache
-    try {
-      const cached = await getOfflineCacheItem<ClientMemory[]>(userId, 'memories');
-      if (cached && currentSeq === sequenceRef.current) {
-        setDbMemories(cached);
+        const memoryMap = new Map<string, ClientMemory>();
+        for (const m of serverMemories) {
+          memoryMap.set(m.id, m);
+        }
+
+        for (const op of memoryOps) {
+          if (op.action === 'create' && op.payload) {
+            const p = op.payload as {
+              id?: string;
+              category: string;
+              fact: string;
+              confidence?: number;
+              source?: string;
+            };
+            memoryMap.set(op.entityId, {
+              id: op.entityId,
+              category: p.category,
+              fact: p.fact,
+              confidence: p.confidence ?? 1.0,
+              source: p.source || 'User Manual Entry',
+              createdAt: op.createdAt,
+              updatedAt: op.updatedAt,
+            });
+          } else if (op.action === 'update' && op.payload) {
+            const existing = memoryMap.get(op.entityId);
+            if (existing) {
+              const p = op.payload as { category?: string; fact?: string; confidence?: number };
+              memoryMap.set(op.entityId, {
+                ...existing,
+                ...(p.category ? { category: p.category } : {}),
+                ...(p.fact ? { fact: p.fact } : {}),
+                ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
+                updatedAt: op.updatedAt,
+              });
+            }
+          } else if (op.action === 'delete') {
+            memoryMap.delete(op.entityId);
+          }
+        }
+
+        return Array.from(memoryMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      } catch {
+        return serverMemories;
+      }
+    },
+    []
+  );
+
+  const fetchMemories = useCallback(
+    async (userId: string) => {
+      const currentSeq = ++sequenceRef.current;
+      setError(null);
+
+      // 1. Instant offline load from local IndexedDB cache
+      try {
+        const cached = await getOfflineCacheItem<ClientMemory[]>(userId, 'memories');
+        if (cached && currentSeq === sequenceRef.current) {
+          setDbMemories(cached);
+          setDbUserId(userId);
+          setLoading(false);
+        }
+      } catch {
+        // Fallback gracefully
+      }
+
+      if (!supabase) return;
+
+      try {
+        const { data, error: fetchErr } = await supabase
+          .from('user_memories')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+
+        if (currentSeq !== sequenceRef.current) return;
+
+        if (fetchErr) {
+          setError('Offline or server unreachable. Showing cached memories.');
+        } else {
+          const clientMemories = (data || []).map(memoryRowToClient);
+          const reconciled = await reconcileMemories(userId, clientMemories);
+          if (currentSeq === sequenceRef.current) {
+            setDbMemories(reconciled);
+            setDbUserId(userId);
+            void setOfflineCacheItem(userId, 'memories', reconciled);
+          }
+        }
+      } catch {
+        if (currentSeq !== sequenceRef.current) return;
+        setError('Network offline. Showing cached memories.');
         setDbUserId(userId);
-        setLoading(false);
+      } finally {
+        if (currentSeq === sequenceRef.current) {
+          setLoading(false);
+        }
       }
-    } catch {
-      // Fallback gracefully
-    }
-
-    if (!supabase) return;
-
-    try {
-      const { data, error: fetchErr } = await supabase
-        .from('user_memories')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (currentSeq !== sequenceRef.current) return;
-
-      if (fetchErr) {
-        setError('Offline or server unreachable. Showing cached memories.');
-      } else {
-        const clientMemories = (data || []).map(memoryRowToClient);
-        setDbMemories(clientMemories);
-        setDbUserId(userId);
-        void setOfflineCacheItem(userId, 'memories', clientMemories);
-      }
-    } catch {
-      if (currentSeq !== sequenceRef.current) return;
-      setError('Network offline. Showing cached memories.');
-      setDbUserId(userId);
-    } finally {
-      if (currentSeq === sequenceRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
+    },
+    [reconcileMemories]
+  );
 
   // Handle user authentication transitions
   useEffect(() => {
@@ -121,7 +186,7 @@ export function useMemories(): UseMemoriesReturn {
       setError(null);
 
       // Local demo mode
-      if (!user || !supabase) {
+      if (!user) {
         const newMem: ClientMemory = {
           id: `mem-${Date.now()}`,
           category: data.category.trim(),
@@ -135,29 +200,44 @@ export function useMemories(): UseMemoriesReturn {
         return true;
       }
 
-      // Authenticated persistence
+      // Authenticated local-first persistence with outbox queue
+      const memoryId = crypto.randomUUID();
+      const newMem: ClientMemory = {
+        id: memoryId,
+        category: data.category.trim(),
+        fact: data.fact.trim(),
+        confidence: data.confidence !== undefined ? data.confidence : 1.0,
+        source: data.source?.trim() || 'User Manual Entry',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setDbMemories((prev) => {
+        const next = [newMem, ...prev];
+        void setOfflineCacheItem(user.id, 'memories', next);
+        return next;
+      });
+
       try {
-        const payload = memoryToInsertPayload(data, user.id);
-        const { data: created, error: insertErr } = await supabase
-          .from('user_memories')
-          .insert(payload)
-          .select('*')
-          .single();
-
-        if (insertErr || !created) {
-          setError(insertErr?.message || 'Failed to save memory to server.');
-          return false;
-        }
-
-        const clientMem = memoryRowToClient(created);
-        setDbMemories((prev) => {
-          const next = [clientMem, ...prev];
-          void setOfflineCacheItem(user.id, 'memories', next);
-          return next;
+        const payload = memoryToInsertPayload({ ...data, id: memoryId }, user.id);
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'memory',
+          entityId: memoryId,
+          action: 'create',
+          payload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
         });
+
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setError('Network offline. Memory could not be saved to server.');
+      } catch (err) {
+        console.warn('[useMemories] Failed to enqueue memory create outbox op:', err);
+        setError('Failed to queue memory locally.');
         return false;
       }
     },
@@ -172,7 +252,7 @@ export function useMemories(): UseMemoriesReturn {
       setError(null);
 
       // Local demo mode
-      if (!user || !supabase) {
+      if (!user) {
         setDemoMemories((prev) =>
           prev.map((m) =>
             m.id === id
@@ -189,8 +269,7 @@ export function useMemories(): UseMemoriesReturn {
         return true;
       }
 
-      // Authenticated persistence with optimistic update and rollback
-      const previousMemories = [...dbMemories];
+      // Authenticated local-first persistence with outbox queue
       const target = dbMemories.find((m) => m.id === id);
       if (!target) return false;
 
@@ -214,24 +293,24 @@ export function useMemories(): UseMemoriesReturn {
         if (updates.fact !== undefined) payload.fact = updates.fact.trim();
         if (updates.confidence !== undefined) payload.confidence = updates.confidence;
 
-        const { error: updateErr } = await supabase
-          .from('user_memories')
-          .update(payload)
-          .eq('id', id)
-          .eq('user_id', user.id);
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'memory',
+          entityId: id,
+          action: 'update',
+          payload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        });
 
-        if (updateErr) {
-          setDbMemories(previousMemories);
-          void setOfflineCacheItem(user.id, 'memories', previousMemories);
-          setError(updateErr.message || 'Failed to update memory on server.');
-          return false;
-        }
-
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setDbMemories(previousMemories);
-        void setOfflineCacheItem(user.id, 'memories', previousMemories);
-        setError('Network offline. Memory update could not be saved to server.');
+      } catch (err) {
+        console.warn('[useMemories] Failed to enqueue memory update outbox op:', err);
+        setError('Failed to queue memory update locally.');
         return false;
       }
     },
@@ -243,12 +322,12 @@ export function useMemories(): UseMemoriesReturn {
       setError(null);
 
       // Local demo mode
-      if (!user || !supabase) {
+      if (!user) {
         setDemoMemories((prev) => prev.filter((m) => m.id !== id));
         return true;
       }
 
-      // Optimistic delete with targeted rollback
+      // Optimistic delete with outbox queue
       const target = dbMemories.find((m) => m.id === id);
       if (!target) return false;
       const nextMemories = dbMemories.filter((m) => m.id !== id);
@@ -256,24 +335,23 @@ export function useMemories(): UseMemoriesReturn {
       void setOfflineCacheItem(user.id, 'memories', nextMemories);
 
       try {
-        const { error: deleteErr } = await supabase
-          .from('user_memories')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', user.id);
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'memory',
+          entityId: id,
+          action: 'delete',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        });
 
-        if (deleteErr) {
-          setDbMemories((prev) => (prev.some((m) => m.id === id) ? prev : [target, ...prev]));
-          void setOfflineCacheItem(user.id, 'memories', dbMemories);
-          setError(deleteErr.message || 'Failed to delete memory from server.');
-          return false;
-        }
-
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setDbMemories((prev) => (prev.some((m) => m.id === id) ? prev : [target, ...prev]));
-        void setOfflineCacheItem(user.id, 'memories', dbMemories);
-        setError('Network offline. Memory deletion could not be saved to server.');
+      } catch (err) {
+        console.warn('[useMemories] Failed to enqueue memory delete outbox op:', err);
+        setError('Failed to queue memory deletion locally.');
         return false;
       }
     },

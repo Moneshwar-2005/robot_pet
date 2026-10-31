@@ -15,6 +15,8 @@ export interface CompanionCapabilities {
   readonly healthCheck: boolean;
   readonly ideTracking: boolean;
   readonly persistentSessions?: boolean;
+  readonly pairingPin?: boolean;
+  readonly portFallback?: boolean;
 }
 
 export interface CompanionIdeSession {
@@ -52,6 +54,7 @@ export interface CompanionHealthResponse {
   readonly service: string;
   readonly version: string;
   readonly platform: string;
+  readonly port?: number;
   readonly state: string;
   readonly requiresAuth: boolean;
   readonly capabilities: CompanionCapabilities;
@@ -60,6 +63,7 @@ export interface CompanionHealthResponse {
 export interface CompanionStatusResponse extends CompanionHealthResponse {
   readonly authenticated: boolean;
   readonly sessionStartedAt?: string;
+  readonly sessionExpiresAt?: string;
   readonly uptimeSeconds?: number;
   readonly tracking?: CompanionTrackingStatusResponse;
 }

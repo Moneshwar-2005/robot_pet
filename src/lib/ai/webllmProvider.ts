@@ -550,6 +550,7 @@ export class WebLLMMobileAIProvider implements AIProvider {
     }
 
     const startTime = performance.now();
+    let firstTokenTime: number | null = null;
     let accumulatedContent = '';
     let evalCount = 0;
 
@@ -604,6 +605,9 @@ export class WebLLMMobileAIProvider implements AIProvider {
           }
           const delta = chunk.choices[0]?.delta?.content || '';
           if (delta) {
+            if (firstTokenTime === null) {
+              firstTokenTime = performance.now() - startTime;
+            }
             evalCount++;
             accumulatedContent += delta;
             onChunk(delta, accumulatedContent);
@@ -622,6 +626,7 @@ export class WebLLMMobileAIProvider implements AIProvider {
         modelUsed: this._loadedModelId || DEFAULT_WEBLLM_MODEL_ID,
         done: true,
         totalDurationMs,
+        ttftMs: firstTokenTime !== null ? Math.round(firstTokenTime) : undefined,
         evalCount,
       };
     } catch (err: unknown) {

@@ -14,8 +14,22 @@ import type {
   CompanionTrackingSessionsResponse,
 } from './types';
 
-export const COMPANION_DEFAULT_PORT = 48199;
+export const COMPANION_PRIMARY_PORT = 48299;
+export const COMPANION_LEGACY_PORT = 48199;
+export const COMPANION_DEFAULT_PORT = COMPANION_PRIMARY_PORT;
 export const COMPANION_DEFAULT_URL = `http://127.0.0.1:${COMPANION_DEFAULT_PORT}`;
+export const COMPANION_LEGACY_URL = `http://127.0.0.1:${COMPANION_LEGACY_PORT}`;
+
+let activeCompanionBaseUrl = COMPANION_DEFAULT_URL;
+
+export function getActiveCompanionUrl(): string {
+  return activeCompanionBaseUrl;
+}
+
+export function setActiveCompanionUrl(url: string): void {
+  activeCompanionBaseUrl = url;
+}
+
 const TOKEN_STORAGE_KEY = 'kuro_companion_session_token';
 const TIMEOUT_MS = 3000;
 
@@ -51,23 +65,49 @@ export function clearStoredPairingToken(): void {
 
 /**
  * Checks if the desktop companion service is running and returns basic health info.
+ * Automatically tries primary port 48299 and fallback port 48199.
  */
 export async function checkCompanionHealth(
-  baseUrl = COMPANION_DEFAULT_URL
+  baseUrl = activeCompanionBaseUrl
 ): Promise<CompanionHealthResponse> {
-  const res = await fetch(`${baseUrl}/api/health`, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-    signal: createTimeoutSignal(),
-  });
+  try {
+    const res = await fetch(`${baseUrl}/api/health`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: createTimeoutSignal(),
+    });
 
-  if (!res.ok) {
-    throw new Error(`Companion responded with status ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`Companion responded with status ${res.status}`);
+    }
+
+    const data = (await res.json()) as CompanionHealthResponse;
+    activeCompanionBaseUrl = baseUrl;
+    return data;
+  } catch (primaryErr) {
+    // If probing primary port failed, try legacy fallback port
+    if (baseUrl === COMPANION_DEFAULT_URL) {
+      try {
+        const fallbackRes = await fetch(`${COMPANION_LEGACY_URL}/api/health`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+          signal: createTimeoutSignal(),
+        });
+        if (fallbackRes.ok) {
+          const fallbackData = (await fallbackRes.json()) as CompanionHealthResponse;
+          activeCompanionBaseUrl = COMPANION_LEGACY_URL;
+          return fallbackData;
+        }
+      } catch {
+        // ignore fallback failure and throw primary error
+      }
+    }
+    throw primaryErr;
   }
-
-  return (await res.json()) as CompanionHealthResponse;
 }
 
 /**
@@ -75,7 +115,7 @@ export async function checkCompanionHealth(
  */
 export async function getCompanionStatus(
   token: string,
-  baseUrl = COMPANION_DEFAULT_URL
+  baseUrl = activeCompanionBaseUrl
 ): Promise<CompanionStatusResponse> {
   const res = await fetch(`${baseUrl}/api/status`, {
     method: 'GET',
@@ -97,19 +137,23 @@ export async function getCompanionStatus(
 }
 
 /**
- * Pairs the web client with the companion using the provided session pairing token.
+ * Pairs the web client with the companion using either a 6-digit PIN or a 32-char session token.
  */
 export async function pairWithCompanion(
-  token: string,
-  baseUrl = COMPANION_DEFAULT_URL
+  tokenOrPin: string,
+  baseUrl = activeCompanionBaseUrl
 ): Promise<{ success: boolean; message: string }> {
+  const trimmed = tokenOrPin.trim();
+  const isPin = /^\d{6}$/.test(trimmed);
+  const payload = isPin ? { pin: trimmed } : { token: trimmed };
+
   const res = await fetch(`${baseUrl}/api/pair`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ token: token.trim() }),
+    body: JSON.stringify(payload),
     signal: createTimeoutSignal(),
   });
 
@@ -117,16 +161,18 @@ export async function pairWithCompanion(
     status?: string;
     message?: string;
     error?: string;
+    token?: string;
   };
 
   if (!res.ok) {
     return {
       success: false,
-      message: data.error || 'Pairing token rejected by companion service.',
+      message: data.error || 'Pairing token or PIN rejected by companion service.',
     };
   }
 
-  setStoredPairingToken(token);
+  const tokenToStore = data.token || trimmed;
+  setStoredPairingToken(tokenToStore);
   return {
     success: true,
     message: data.message || 'Successfully paired with Desktop Companion.',

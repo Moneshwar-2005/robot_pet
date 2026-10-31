@@ -10,6 +10,43 @@
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+// Hardware-configured LovyanGFX device for ESP32-WROOM-32 and 0.96" SSD1306 I2C OLED (128x64)
+class LGFX_Kuro_OLED : public lgfx::LGFX_Device {
+  lgfx::Panel_SSD1306 _panel_ssd;
+  lgfx::Bus_I2C       _bus_instance;
+
+public:
+  LGFX_Kuro_OLED() {
+    // 1. I2C Bus Configuration (I2C_NUM_0 on ESP32)
+    {
+      auto cfg = _bus_instance.config();
+      cfg.i2c_port = 0;
+      cfg.freq_write = OLED_I2C_FREQ;
+      cfg.freq_read  = OLED_I2C_FREQ;
+      cfg.pin_sda = KURO_PIN_OLED_SDA;
+      cfg.pin_scl = KURO_PIN_OLED_SCL;
+      cfg.i2c_addr = KURO_OLED_I2C_ADDR;
+      _bus_instance.config(cfg);
+    }
+
+    // 2. Panel Configuration
+    {
+      auto cfg = _panel_ssd.config();
+      cfg.panel_width  = SCREEN_WIDTH;
+      cfg.panel_height = SCREEN_HEIGHT;
+      cfg.offset_x     = 0;
+      cfg.offset_y     = 0;
+      _panel_ssd.config(cfg);
+      _panel_ssd.setBus(&_bus_instance);
+      setPanel(&_panel_ssd);
+    }
+  }
+};
+
+static lgfx::LGFX_Device* pLgfx = nullptr;
+
+#else
 // Hardware-configured LovyanGFX device for ESP32-S3 and 2.4" SPI TFT LCD
 class LGFX_Kuro : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9341 _panel_ili;
@@ -83,7 +120,9 @@ public:
   }
 };
 
-static LGFX_Kuro* pLgfx = nullptr;
+static lgfx::LGFX_Device* pLgfx = nullptr;
+#endif
+
 #endif
 
 DisplayHAL display;
@@ -96,10 +135,14 @@ DisplayHAL::DisplayHAL()
 bool DisplayHAL::init() {
 #ifdef ARDUINO
   if (!pLgfx) {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+    pLgfx = new LGFX_Kuro_OLED();
+#else
     pLgfx = new LGFX_Kuro(_controllerType);
+#endif
   }
   pLgfx->init();
-  pLgfx->setRotation(TFT_ROTATION);
+  pLgfx->setRotation(DISPLAY_ROTATION);
   pLgfx->setBrightness((uint8_t)(_brightness * 255 / 100));
 #endif
 
@@ -120,6 +163,9 @@ void DisplayHAL::setBrightness(uint8_t percent) {
 }
 
 const char* DisplayHAL::getDriverName() const {
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  return "SSD1306 I2C OLED (128x64)";
+#else
   switch (_controllerType) {
     case DISPLAY_CONTROLLER_ST7789:
       return "ST7789V (320x240)";
@@ -127,6 +173,7 @@ const char* DisplayHAL::getDriverName() const {
     default:
       return "ILI9341 (320x240)";
   }
+#endif
 }
 
 void DisplayHAL::clear(uint16_t color) {
@@ -136,7 +183,7 @@ void DisplayHAL::clear(uint16_t color) {
     return;
   }
 #endif
-  fillRect(0, 0, TFT_SCREEN_WIDTH, TFT_SCREEN_HEIGHT, color);
+  fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color);
 }
 
 void DisplayHAL::startWrite() {
@@ -151,12 +198,13 @@ void DisplayHAL::endWrite() {
 #ifdef ARDUINO
   if (pLgfx && _initialized) {
     pLgfx->endWrite();
+    pLgfx->display(); // Flushes frame buffer on buffered displays like SSD1306
   }
 #endif
 }
 
 void DisplayHAL::drawPixel(int16_t x, int16_t y, uint16_t color) {
-  if (x < 0 || x >= TFT_SCREEN_WIDTH || y < 0 || y >= TFT_SCREEN_HEIGHT) return;
+  if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return;
 #ifdef ARDUINO
   if (pLgfx && _initialized) {
     pLgfx->drawPixel(x, y, color);
@@ -325,11 +373,11 @@ void DisplayHAL::drawText(int16_t x, int16_t y, const char* text, uint16_t color
       cursorY += (8 * size);
       continue;
     }
-    if (cursorX + (6 * size) > TFT_SCREEN_WIDTH) {
+    if (cursorX + (6 * size) > SCREEN_WIDTH) {
       cursorX = x;
       cursorY += (8 * size);
     }
-    if (cursorY + (8 * size) > TFT_SCREEN_HEIGHT) break;
+    if (cursorY + (8 * size) > SCREEN_HEIGHT) break;
     cursorX += (6 * size);
   }
 }
@@ -340,13 +388,13 @@ void DisplayHAL::drawTextCentered(int16_t y, const char* text, uint16_t color, u
   if (pLgfx && _initialized) {
     pLgfx->setTextSize(size);
     pLgfx->setTextColor(color, COLOR_BG_DARK);
-    pLgfx->drawCenterString(text, TFT_SCREEN_WIDTH / 2, y);
+    pLgfx->drawCenterString(text, SCREEN_WIDTH / 2, y);
     return;
   }
 #endif
   int16_t len = (int16_t)strlen(text);
   int16_t w = len * 6 * size;
-  int16_t x = (TFT_SCREEN_WIDTH - w) / 2;
-  if (x < 4) x = 4;
+  int16_t x = (SCREEN_WIDTH - w) / 2;
+  if (x < 2) x = 2;
   drawText(x, y, text, color, size);
 }

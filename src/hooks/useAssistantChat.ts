@@ -27,8 +27,12 @@ import {
   parseActionProposal,
   type ActionProposal,
 } from '../lib/assistantActions';
-import { formatLocalDateString } from '../lib/formatters';
 import { getActiveOllamaBaseUrl } from '../lib/ollama';
+import type { ClientMemory } from '../lib/adapters';
+import { getOfflineCacheItem } from '../lib/offlineDb';
+import { buildSystemPrompt } from '../lib/ai/assistantPrompt';
+
+export { buildSystemPrompt };
 
 export interface UIChatMessage {
   id: string;
@@ -50,46 +54,13 @@ export interface Conversation {
   messages: UIChatMessage[];
 }
 
-function buildSystemPrompt(): string {
-  const localDateStr = formatLocalDateString();
-  const dayName = new Date().toLocaleDateString(undefined, { weekday: 'long' });
-
-  return `You are Kuro, a helpful, polite, and concise desktop personal assistant and companion.
-You assist the user with focus, productivity, scheduling ideas, task planning, and answering questions.
-Be concise, clear, and direct.
-Today is ${dayName}, ${localDateStr}.
-Admit uncertainty when you do not know something or cannot perform a physical action.
-Never claim to have inspected files or computer activity unless provided in the chat.
-
-ACTION PROPOSAL RULES:
-When the user explicitly asks you to create, add, or schedule a task or reminder, provide a brief conversational response AND include an action proposal block formatted exactly as:
-\`\`\`action
-{
-  "action": "create_task",
-  "title": "Task title",
-  "category": "work",
-  "priority": "medium",
-  "dueDate": "YYYY-MM-DD",
-  "dueTime": "HH:MM",
-  "estimatedMinutes": 25,
-  "description": "Optional notes"
-}
-\`\`\`
-OR for a reminder:
-\`\`\`action
-{
-  "action": "create_reminder",
-  "title": "Reminder title",
-  "time": "YYYY-MM-DDTHH:mm:ss",
-  "reminderType": "wellness",
-  "priority": "normal"
-}
-\`\`\`
-- Valid task categories: "work", "personal", "robot", "learning".
-- Valid task priorities: "low", "medium", "high", "urgent".
-- Valid reminder types: "wellness", "task", "meeting", "pet-routine".
-- Valid reminder priorities: "normal", "important".
-- Never invent actions or execute them yourself; the user must confirm them first. Only propose an action when the user explicitly requests one.`;
+export interface AIGenerationMetrics {
+  contextPrepMs: number;
+  memoryRetrievalMs: number;
+  providerDurationMs: number;
+  ttftMs: number | null;
+  totalDurationMs: number;
+  evalCount?: number;
 }
 
 function createDefaultWelcomeMessage(): UIChatMessage {
@@ -185,9 +156,27 @@ function saveConversationsToStorage(
   }
 }
 
-export function useAssistantChat() {
+export interface UseAssistantChatOptions {
+  memories?: ClientMemory[];
+}
+
+export function useAssistantChat(options: UseAssistantChatOptions = {}) {
   const { user } = useAuth();
   const userId = user?.id || null;
+
+  const memoriesRef = useRef<ClientMemory[] | undefined>(options.memories);
+  useEffect(() => {
+    memoriesRef.current = options.memories;
+  }, [options.memories]);
+
+  const [cachedMemories, setCachedMemories] = useState<ClientMemory[]>([]);
+  useEffect(() => {
+    if (userId) {
+      void getOfflineCacheItem<ClientMemory[]>(userId, 'memories').then((mems) => {
+        if (mems) setCachedMemories(mems);
+      });
+    }
+  }, [userId]);
 
   // Provider architecture state
   const providers = getAllProviders();
@@ -204,6 +193,7 @@ export function useAssistantChat() {
   const [initProgress, setInitProgress] = useState<AIInitProgress | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(false);
   const [benchmarkTimingMs, setBenchmarkTimingMs] = useState<number | null>(null);
+  const [lastMetrics, setLastMetrics] = useState<AIGenerationMetrics | null>(null);
   const [lifecycleState, setLifecycleState] = useState<WebLLMLifecycleState>(
     webllmMobileProvider.lifecycleState || 'not_initialized'
   );
@@ -557,6 +547,7 @@ export function useAssistantChat() {
       isSendingRef.current = true;
 
       const targetConvId = activeConversationIdRef.current;
+      let rafId: number | null = null;
 
       try {
         if (!activeProvider.isImplemented) {
@@ -664,14 +655,24 @@ export function useAssistantChat() {
         const controller = new AbortController();
         activeAbortControllerRef.current = controller;
         let accumulatedText = '';
+        let pendingTextToRender = '';
 
         try {
+          const startTime = performance.now();
           const currentConv = conversations.find((c) => c.id === targetConvId);
           const currentMessages = currentConv ? currentConv.messages : [];
 
-          // Build context payload with bounded recent history (8 recent turns for fast processing)
+          // Build context payload with bounded recent history and injected user memories
+          const memStart = performance.now();
+          const activeMemories =
+            memoriesRef.current && memoriesRef.current.length > 0
+              ? memoriesRef.current
+              : cachedMemories;
+          const memoryRetrievalMs = Math.round(performance.now() - memStart);
+
+          const prepStart = performance.now();
           const contextPayload: AIChatMessage[] = [
-            { role: 'system', content: buildSystemPrompt() },
+            { role: 'system', content: buildSystemPrompt(activeMemories) },
           ];
 
           const recentHistory = currentMessages
@@ -688,6 +689,7 @@ export function useAssistantChat() {
             role: 'user',
             content: cleanText,
           });
+          const contextPrepMs = Math.round(performance.now() - prepStart);
 
           const streamResult = await activeProvider.sendChatStream({
             model: selectedModel,
@@ -701,27 +703,65 @@ export function useAssistantChat() {
             },
             onChunk: (_delta, fullTextSoFar) => {
               accumulatedText = fullTextSoFar;
+              pendingTextToRender = fullTextSoFar;
               if (targetConvId !== activeConversationIdRef.current) {
                 return;
               }
 
-              setConversations((prev) =>
-                prev.map((conv) => {
-                  if (conv.id !== targetConvId) return conv;
-                  return {
-                    ...conv,
-                    messages: conv.messages.map((m) =>
-                      m.id === assistantMsgId ? { ...m, text: fullTextSoFar } : m
-                    ),
-                  };
-                })
-              );
+              // Throttle React renders with requestAnimationFrame to prevent main thread freezing
+              if (typeof window !== 'undefined' && 'requestAnimationFrame' in window) {
+                if (rafId === null) {
+                  rafId = window.requestAnimationFrame(() => {
+                    rafId = null;
+                    if (targetConvId !== activeConversationIdRef.current) return;
+                    const textSnapshot = pendingTextToRender;
+                    setConversations((prev) =>
+                      prev.map((conv) => {
+                        if (conv.id !== targetConvId) return conv;
+                        return {
+                          ...conv,
+                          messages: conv.messages.map((m) =>
+                            m.id === assistantMsgId ? { ...m, text: textSnapshot } : m
+                          ),
+                        };
+                      })
+                    );
+                  });
+                }
+              } else {
+                setConversations((prev) =>
+                  prev.map((conv) => {
+                    if (conv.id !== targetConvId) return conv;
+                    return {
+                      ...conv,
+                      messages: conv.messages.map((m) =>
+                        m.id === assistantMsgId ? { ...m, text: fullTextSoFar } : m
+                      ),
+                    };
+                  })
+                );
+              }
             },
           });
+
+          if (rafId !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(rafId);
+            rafId = null;
+          }
 
           if (streamResult.totalDurationMs) {
             setBenchmarkTimingMs(streamResult.totalDurationMs);
           }
+
+          const totalDurationMs = Math.round(performance.now() - startTime);
+          setLastMetrics({
+            contextPrepMs,
+            memoryRetrievalMs,
+            providerDurationMs: streamResult.totalDurationMs ?? Math.round(performance.now() - (startTime + contextPrepMs + memoryRetrievalMs)),
+            ttftMs: streamResult.ttftMs ?? null,
+            totalDurationMs,
+            evalCount: streamResult.evalCount,
+          });
 
           if (targetConvId !== activeConversationIdRef.current) {
             return;
@@ -834,12 +874,16 @@ export function useAssistantChat() {
           }
         }
       } finally {
+        if (rafId !== null && typeof window !== 'undefined') {
+          window.cancelAnimationFrame(rafId);
+          rafId = null;
+        }
         activeAbortControllerRef.current = null;
         setIsLoading(false);
         isSendingRef.current = false;
       }
     },
-    [isLoading, activeProvider, selectedModel, conversations, connectionError, connectionGuidance]
+    [isLoading, activeProvider, selectedModel, conversations, connectionError, connectionGuidance, cachedMemories]
   );
 
   const retryLastMessage = useCallback(() => {
@@ -890,6 +934,7 @@ export function useAssistantChat() {
     deleteOnDeviceCachedModel,
     unloadOnDeviceModel,
     benchmarkTimingMs,
+    lastMetrics,
   };
 }
 

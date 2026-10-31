@@ -110,14 +110,30 @@ function createTimeoutSignal(timeoutMs: number, callerSignal?: AbortSignal): {
   return { signal: controller.signal, cleanup };
 }
 
+let cachedTagsResult: { result: OllamaCheckResult; timestamp: number; baseUrl: string } | null = null;
+
+/**
+ * Clears the 30-second in-memory Ollama model discovery cache.
+ */
+export function clearOllamaDiscoveryCache(): void {
+  cachedTagsResult = null;
+}
+
 /**
  * Checks connectivity to local Ollama and discovers available models.
+ * Results are cached in-memory for 30 seconds to prevent redundant network round-trips.
  */
 export async function checkOllamaConnection(
   customBaseUrl?: string,
-  timeoutMs = 5000
+  timeoutMs = 5000,
+  forceRefresh = false
 ): Promise<OllamaCheckResult> {
   const baseUrl = customBaseUrl || getActiveOllamaBaseUrl();
+
+  if (!forceRefresh && cachedTagsResult && cachedTagsResult.baseUrl === baseUrl && (Date.now() - cachedTagsResult.timestamp < 30000)) {
+    return cachedTagsResult.result;
+  }
+
   const endpoint = `${baseUrl}/api/tags`;
   const { signal, cleanup } = createTimeoutSignal(timeoutMs);
 
@@ -215,20 +231,24 @@ export async function checkOllamaConnection(
       .filter((m): m is OllamaModel => m !== null);
 
     if (models.length === 0) {
-      return {
+      const resNoModels: OllamaCheckResult = {
         ok: true,
         state: 'no_models',
         models: [],
         error: 'Ollama is running, but no models are currently installed.',
         recoveryGuidance: 'Run `ollama run llama3:8b` or `ollama pull qwen2.5:3b` in your terminal to install a model.',
       };
+      cachedTagsResult = { result: resNoModels, timestamp: Date.now(), baseUrl };
+      return resNoModels;
     }
 
-    return {
+    const resConnected: OllamaCheckResult = {
       ok: true,
       state: 'connected',
       models,
     };
+    cachedTagsResult = { result: resConnected, timestamp: Date.now(), baseUrl };
+    return resConnected;
   } catch (err: unknown) {
     cleanup();
 
@@ -424,6 +444,7 @@ export interface OllamaChatStreamResult {
   content: string;
   done: boolean;
   totalDuration?: number;
+  ttftMs?: number;
   evalCount?: number;
 }
 
@@ -517,6 +538,8 @@ export async function sendOllamaChatStream(params: OllamaChatStreamParams): Prom
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
 
+    const streamStartTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let firstTokenTime: number | null = null;
     let accumulatedContent = '';
     let buffer = '';
     let finalModel = model;
@@ -545,6 +568,10 @@ export async function sendOllamaChatStream(params: OllamaChatStreamParams): Prom
 
             const delta = data.message?.content || '';
             if (delta) {
+              if (firstTokenTime === null) {
+                const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                firstTokenTime = now - streamStartTime;
+              }
               accumulatedContent += delta;
               onChunk(delta, accumulatedContent);
             }
@@ -564,6 +591,10 @@ export async function sendOllamaChatStream(params: OllamaChatStreamParams): Prom
 
           const delta = data.message?.content || '';
           if (delta) {
+            if (firstTokenTime === null) {
+              const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+              firstTokenTime = now - streamStartTime;
+            }
             accumulatedContent += delta;
             onChunk(delta, accumulatedContent);
           }
@@ -576,11 +607,14 @@ export async function sendOllamaChatStream(params: OllamaChatStreamParams): Prom
       cleanup();
     }
 
+    const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - streamStartTime);
+
     return {
       model: finalModel,
       content: accumulatedContent,
       done: true,
-      totalDuration,
+      totalDuration: totalDuration ? Math.round(totalDuration / 1e6) : elapsedMs,
+      ttftMs: firstTokenTime !== null ? Math.round(firstTokenTime) : undefined,
       evalCount,
     };
   } catch (err: unknown) {

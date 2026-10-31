@@ -181,7 +181,7 @@ export const DesktopCompanionCard: React.FC = () => {
         >
           <Info size={15} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginTop: '2px' }} />
           <div>
-            <strong>Step 4.2 Privacy-Respecting IDE Detection:</strong> Operates strictly via loopback (<code>127.0.0.1:48199</code>).
+            <strong>Privacy-Respecting IDE Detection:</strong> Operates strictly via loopback (<code>127.0.0.1:48299 / 48199</code>).
             <div style={{ marginTop: '2px', color: 'var(--text-muted)' }}>
               Tracking is opt-in and disabled by default. When enabled, it only reads coarse IDE process presence and safe window workspace titles. Zero keystrokes, clipboard, screenshots, or code files are ever collected.
             </div>
@@ -215,7 +215,7 @@ export const DesktopCompanionCard: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '11.5px' }}>
               <div style={{ backgroundColor: 'var(--bg-card)', padding: '6px 10px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Loopback Host:</span>{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>127.0.0.1:48199</strong>
+                <strong style={{ color: 'var(--text-primary)' }}>127.0.0.1:{status.port || '48299'}</strong>
               </div>
               <div style={{ backgroundColor: 'var(--bg-card)', padding: '6px 10px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>IDE Detection:</span>{' '}
@@ -491,7 +491,7 @@ export const DesktopCompanionCard: React.FC = () => {
               <strong style={{ color: 'var(--text-primary)' }}>Companion Detected — Pairing Required</strong>
             </div>
             <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-              The companion is active on <code>127.0.0.1:48199</code>. To prevent unauthorized browser scripts from accessing your companion, enter the 32-character session token from your companion console or the file <code>companion\.session_token</code>.
+              The companion is active on loopback. Enter the 6-digit Pairing PIN or 32-character token displayed in the console or saved in <code>companion\.session_pin</code>.
             </p>
 
             <form onSubmit={handlePairSubmit} style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
@@ -510,7 +510,7 @@ export const DesktopCompanionCard: React.FC = () => {
                   type="password"
                   value={inputToken}
                   onChange={(e) => setInputToken(e.target.value)}
-                  placeholder="Paste 32-character session pairing token..."
+                  placeholder="Enter 6-digit PIN or 32-character token..."
                   className="input"
                   style={{
                     width: '100%',

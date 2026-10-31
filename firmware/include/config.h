@@ -3,11 +3,15 @@
 /**
  * Kuro Robot Companion — Hardware Configuration & Constants
  *
- * Board Target: ESP32-S3-DevKitC-1 with ESP32-S3-WROOM-1-N8R8
- * Display Visor: 2.4" SPI TFT LCD (320x240, Landscape)
+ * Supported Hardware Targets:
+ * 1. ESP32-S3-DevKitC-1 with ESP32-S3-WROOM-1-N8R8 (8MB Flash, 8MB Octal PSRAM)
+ *    Display: 2.4" SPI TFT LCD (320x240, ILI9341 or ST7789)
+ *
+ * 2. ESP32-WROOM-32 DevKit V1 (38-pin, 4MB Flash, Internal SRAM)
+ *    Display: 0.96" I2C SSD1306 OLED (128x64, Monochrome, Address 0x3C)
  *
  * CRITICAL HARDWARE SAFETY NOTICE:
- * All pin assignments below are PROVISIONAL based on pre-purchasing review (docs/HARDWARE_SPECIFICATION.md).
+ * All pin assignments below are PROVISIONAL based on pre-purchasing reviews and standard pinouts.
  * They must be physically verified against the received development board and display pinout
  * before applying power.
  */
@@ -26,10 +30,10 @@
 #define HEARTBEAT_TIMEOUT_MS        15000 // Inactivity threshold before flagging lost web connection
 
 // =============================================================================
-// 1. PROVISIONAL PIN ASSIGNMENTS (ESP32-S3 to 2.4" SPI TFT LCD)
+// 1. PIN ASSIGNMENTS & HARDWARE TARGET CONFIGURATION
 // =============================================================================
 
-// SPI Bus Interface (FSPI / SPI2 on ESP32-S3)
+// Target 1: ESP32-S3 to 2.4" SPI TFT LCD (PROVISIONAL)
 #define KURO_PIN_TFT_CS       10    // Chip Select (Active Low) - PROVISIONAL
 #define KURO_PIN_TFT_RST      9     // Hardware Reset (Active Low) - PROVISIONAL
 #define KURO_PIN_TFT_DC       11    // Data/Command Control (1=Data, 0=Cmd) - PROVISIONAL
@@ -38,25 +42,61 @@
 #define KURO_PIN_TFT_BLK      14    // Backlight PWM Control Pin - PROVISIONAL
 #define KURO_PIN_TFT_MISO     -1    // Unused for write-only graphics
 
-// RESTRICTED PINS ON ESP32-S3-WROOM-1-N8R8 (DO NOT ASSIGN):
+// Target 2: ESP32-WROOM-32 DevKit V1 (38-pin) to 0.96" SSD1306 I2C OLED (PROVISIONAL)
+#ifndef KURO_PIN_OLED_SDA
+#define KURO_PIN_OLED_SDA     21    // Default ESP32 Hardware I2C SDA
+#endif
+#ifndef KURO_PIN_OLED_SCL
+#define KURO_PIN_OLED_SCL     22    // Default ESP32 Hardware I2C SCL
+#endif
+#ifndef KURO_OLED_I2C_ADDR
+#define KURO_OLED_I2C_ADDR    0x3C  // Default I2C address for 0.96" SSD1306 OLED (Alternative: 0x3D)
+#endif
+
+// HARDWARE PIN RESTRICTION SAFEGUARDS:
+//
+// Restricted Pins on ESP32-S3-WROOM-1-N8R8 (DO NOT ASSIGN):
 // - GPIO 33, 34, 35, 36, 37: Internally wired to 8MB Octal PSRAM!
 // - GPIO 0, 45, 46: Strapping pins affecting boot mode.
+//
+// Restricted Pins on ESP32-WROOM-32 DevKit V1 (38-pin) (DO NOT ASSIGN):
+// - GPIO 6, 7, 8, 9, 10, 11: Internally wired to internal SPI flash! (Boot loop if touched).
+// - GPIO 0, 2, 5, 12, 15: Strapping pins (must remain in default states at power-on).
+// - GPIO 34, 35, 36, 39: Input-only GPI pins (cannot be used for I2C SDA/SCL outputs).
+// - Verified safe pins: GPIO 21 (SDA) and GPIO 22 (SCL) are dedicated hardware I2C pins.
 
 // =============================================================================
-// 2. DISPLAY DIMENSIONS & BUS SETTINGS
+// 2. DISPLAY DIMENSIONS & CONTROLLER CONFIGURATION
 // =============================================================================
 
 #define TFT_SCREEN_WIDTH      320
 #define TFT_SCREEN_HEIGHT     240
-#define TFT_ROTATION          1     // Landscape mode (USB connector to left or right as mounted)
+#define TFT_ROTATION          1     // Landscape mode
 #define TFT_SPI_FREQ_READ     16000000
 #define TFT_SPI_FREQ_WRITE    40000000  // 40 MHz SPI clock for fluid 30 FPS updates
 #define TFT_SPI_FREQ_INIT     20000000  // 20 MHz safe initialization frequency
 
-// Driver Controller Selection: 1 for ILI9341 (Primary), 2 for ST7789V (Fallback)
-#define DISPLAY_CONTROLLER_ILI9341  1
-#define DISPLAY_CONTROLLER_ST7789   2
-#define ACTIVE_DISPLAY_CONTROLLER   DISPLAY_CONTROLLER_ILI9341
+#define OLED_SCREEN_WIDTH     128
+#define OLED_SCREEN_HEIGHT    64
+#define OLED_ROTATION         0     // Standard landscape mode for 128x64 visor
+#define OLED_I2C_FREQ         400000 // 400 kHz Fast-mode I2C clock
+
+// Driver Controller Selection
+#define DISPLAY_CONTROLLER_ILI9341      1
+#define DISPLAY_CONTROLLER_ST7789       2
+#define DISPLAY_CONTROLLER_SSD1306_I2C  3
+
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+#define SCREEN_WIDTH          OLED_SCREEN_WIDTH
+#define SCREEN_HEIGHT         OLED_SCREEN_HEIGHT
+#define DISPLAY_ROTATION      OLED_ROTATION
+#define ACTIVE_DISPLAY_CONTROLLER DISPLAY_CONTROLLER_SSD1306_I2C
+#else
+#define SCREEN_WIDTH          TFT_SCREEN_WIDTH
+#define SCREEN_HEIGHT         TFT_SCREEN_HEIGHT
+#define DISPLAY_ROTATION      TFT_ROTATION
+#define ACTIVE_DISPLAY_CONTROLLER DISPLAY_CONTROLLER_ILI9341
+#endif
 
 // =============================================================================
 // 3. ANIMATION & SCHEDULING PARAMETERS
@@ -82,8 +122,6 @@
 #define MDNS_HOSTNAME               "kuro-robot" // kuro-robot.local
 
 // Kuro Gateway Connection (Configure to your workstation/server IP on the LAN)
-// IMPORTANT: Do NOT use "localhost" or "127.0.0.1" here; on the ESP32, localhost refers
-// to the microcontroller itself. Use your workstation's LAN IP (e.g. 192.168.1.100).
 #ifndef KURO_GATEWAY_HOST
 #define KURO_GATEWAY_HOST           "192.168.1.100"
 #endif

@@ -30,17 +30,20 @@ import { CloudAISetupPanel } from '../components/assistant/CloudAISetupPanel';
 import type { Task, Reminder, PageId } from '../types';
 import type { ActionProposal, TaskProposalPayload, ReminderProposalPayload } from '../lib/assistantActions';
 import type { AIProviderId } from '../lib/ai';
+import type { ClientMemory } from '../lib/adapters';
 
 interface AssistantPageProps {
   onAddTask?: (newTaskData: Omit<Task, 'id'>) => Promise<void>;
   onAddReminder?: (newReminderData: Omit<Reminder, 'id'>) => Promise<void>;
   onNavigate?: (page: PageId) => void;
+  memories?: ClientMemory[];
 }
 
 export const AssistantPage: React.FC<AssistantPageProps> = ({
   onAddTask,
   onAddReminder,
   onNavigate,
+  memories,
 }) => {
   const { user } = useAuth();
   const isAuthUser = Boolean(user);
@@ -84,7 +87,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     deleteOnDeviceCachedModel,
     unloadOnDeviceModel,
     benchmarkTimingMs,
-  } = useAssistantChat();
+  } = useAssistantChat({ memories });
 
 
   const [inputValue, setInputValue] = useState('');

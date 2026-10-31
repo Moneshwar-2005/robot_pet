@@ -1,156 +1,225 @@
-# Kuro — Phase 8.4: PlatformIO Setup & Firmware Build Report
+# Kuro — Phase 8.4A: Isolated PlatformIO Setup & Firmware Build Report
 
-**Document Version:** 1.0.0  
-**Phase:** 8.4 (PlatformIO Setup & Real Firmware Build)  
-**Date:** 2026-10-29  
-**Status:** Firmware Code Verified & Compilation Blocked (Toolchain Pending Explicit Approval)  
-**Strict Safety Notice:** No software or toolchains have been installed without explicit user approval. System PATH, execution policy, and system files remain untouched. Real hardware has not been flashed.
+**Document Version:** 2.0.0  
+**Phase:** 8.4A (Isolated PlatformIO Setup & Genuine Firmware Compilation)  
+**Date:** 2026-10-30  
+**Status:** Firmware Successfully Compiled (Clean Binary Generated)  
+**Safety Guarantees Maintained:**
+- Zero hardware flashed, uploaded, erased, or modified.
+- Zero system-wide PATH or execution policy modifications.
+- Zero toolchain files installed on Drive C: (Drive C: preserved with >6.0 GB free).
+- Project-isolated Python 3.11 runtime, virtual environment, and PlatformIO Core deployed strictly on Drive F:.
+- Zero modifications to Supabase database schema, RLS policies, or cloud AI endpoints.
 
 ---
 
 ## 1. Executive Summary
 
-Phase 8.4 attempted the initial genuine ESP32-S3 firmware compilation for the approved `esp32s3_n8r8` environment.
+Phase 8.4A successfully established an isolated, project-scoped PlatformIO build toolchain on Drive `F:` and performed a genuine compile-only build for the target `esp32s3_n8r8` environment.
 
-1. **Host Toolchain Inspection:** A comprehensive filesystem and registry audit determined that neither PlatformIO Core (`pio`) nor Python 3 is installed on the system `PATH`. Microsoft VS Code is installed (`C:\Users\ADMIN\AppData\Local\Programs\Microsoft VS Code`), but the PlatformIO IDE extension (`platformio.platformio-ide`) is not yet installed.
-2. **Strict Compliance with Download & Installation Policy:** In strict adherence to user guidelines (*"Do not install software or download toolchains without explicit approval"* and *"Do not change system-wide PATH or execution policy without approval"*), the agent **did not silently install packages or download the Espressif32 toolchain**.
-3. **Drive C Storage Constraint:** Drive C has only **6.26 GB of free disk space**. Downloading the full Espressif32 platform and Xtensa GCC toolchain requires 2.5–3.8 GB, making silent installation a storage hazard.
-4. **Firmware Source Code Audit & Fixes:** Inspected all firmware source files and headers. Added `#include <esp_system.h>` to `firmware/src/net_manager.cpp` to ensure robust compilation of `esp_get_free_heap_size()`. Confirmed SPI DMA, LovyanGFX panel configurations, memory bounds, and protocol v1.0 handlers.
-5. **Compilation Status:** **BLOCKED — TOOLCHAIN UNAVAILABLE PENDING APPROVAL**. In compliance with instructions, this is clearly reported as blocked rather than falsely claiming compilation success.
-6. **Regression Verification:** All **10 test suites passed** with **248 automated tests passing and 0 failures**. Zero linter errors across 102 files and zero TypeScript errors.
+1. **Isolated Toolchain Provisioning:**
+   - Downloaded and installed a dedicated Python 3.11 runtime (`cpython-3.11.16`) to `F:\.toolchains\python` using `uv` (bypassing incompatible Python 3.14).
+   - Created an isolated Python virtual environment at `F:\.toolchains\venv-pio`.
+   - Installed PlatformIO Core CLI (`v6.2.0`) inside `F:\.toolchains\venv-pio`.
+   - Configured `core_dir = F:\.platformio` so all Espressif32 packages, toolchains (`toolchain-xtensa-esp32s3`), libraries (`LovyanGFX`, `ArduinoJson`, `WebSockets`), and build caches reside strictly on Drive `F:`.
+2. **Drive Storage Protection:**
+   - Pre-build Drive C: 6.16 GB free; Post-build Drive C: 6.02 GB free.
+   - Pre-build Drive F: 15.01 GB free; Post-build Drive F: 12.14 GB free (toolchains and caches consumed 2.87 GB on F:, well within the available 15 GB).
+3. **Configuration & Compiler Error Resolutions:**
+   - Removed `-mfix-esp32-psram-cache-issue` from `firmware/platformio.ini`. (This flag is exclusive to classic ESP32 Xtensa LX6 and causes an unrecognized command-line option error on ESP32-S3 Xtensa LX7).
+   - Configured `board_build.partitions = default_8MB.csv` for 8MB Flash layouts (and `default_16MB.csv` for 16MB), providing a 3.34MB application partition.
+   - Added `#include <esp_system.h>` to `firmware/src/net_manager.cpp` to ensure cross-compiler declaration of `esp_get_free_heap_size()`.
+4. **Genuine Compilation Result:**
+   - Environment: `esp32s3_n8r8` (ESP32-S3-WROOM-1-N8R8, 8MB Flash, 8MB Octal PSRAM).
+   - Exit Code: **0 (SUCCESS in 247.52 seconds)**.
+   - Output Binaries: `firmware.bin` (1,007,856 bytes), `bootloader.bin` (15,104 bytes), and `partitions.bin` (3,072 bytes) generated in `firmware/.pio/build/esp32s3_n8r8/`.
+   - Memory Consumption: **RAM 15.1%** (49,548 bytes used / 327,680 bytes internal SRAM); **Flash 30.1%** (1,007,489 bytes used / 3,342,336 bytes).
+5. **Full Regression Validation:**
+   - **All 10 test suites passed** with **248 automated tests passing and 0 failures**.
+   - Zero linter errors across 102 source files via `oxlint`.
+   - Zero TypeScript compiler errors via `tsc -b`.
+   - Clean production client build via `vite build` (1.70s).
 
 ---
 
-## 2. Toolchain Availability Audit
+## 2. Isolated Toolchain Environment Configuration
 
-The agent performed deep filesystem and command checks across all connected drives:
+### 2.1 File System & Tool Locations (All on Drive F:)
 
-| Tool / Component | Expected Location | Actual Status | Details |
-| :--- | :--- | :---: | :--- |
-| **Microsoft VS Code** | `C:\Users\ADMIN\AppData\Local\Programs\Microsoft VS Code` | **INSTALLED** | `Code.exe` present; version 1.9x |
-| **VS Code PlatformIO Extension** | `C:\Users\ADMIN\.vscode\extensions\platformio.*` | **NOT INSTALLED** | 10 other extensions present; PlatformIO extension absent |
-| **PlatformIO Core CLI (`pio`)** | System `PATH` | **NOT INSTALLED** | `where.exe pio` returned not found |
-| **PlatformIO Cache (`~/.platformio`)** | `C:\Users\ADMIN\.platformio` | **NOT PRESENT** | No cached Xtensa toolchain or Espressif framework packages |
-| **Python on System PATH** | System `PATH` | **NOT FOUND** | Neither `python`, `python3`, nor `py` launcher found on PATH |
-| **Standalone `uv` Python Tool** | `C:\Users\ADMIN\.local\bin\uv.exe` | **INSTALLED** | Found `uv.exe` with experimental `cpython-3.14.7` isolated under Roaming AppData (incompatible with PlatformIO Core 6.x / SCons 4.x which require Python 3.9–3.12) |
-| **Available Disk Space (Drive C:)** | `C:\` | **6.26 GB FREE** | High storage sensitivity; caution required with large toolchains |
+| Component | Physical Path on Disk | Purpose |
+| :--- | :--- | :--- |
+| **Python 3.11 Runtime** | `F:\.toolchains\python\cpython-3.11.16-windows-x86_64-none\python.exe` | Isolated CPython 3.11.16 interpreter managed by `uv` |
+| **Virtual Environment** | `F:\.toolchains\venv-pio` | Isolated Python venv containing `platformio`, `scons`, and dependencies |
+| **PlatformIO Core CLI** | `F:\.toolchains\venv-pio\Scripts\pio.exe` | PlatformIO Core v6.2.0 command-line runner |
+| **PlatformIO Core Dir** | `F:\.platformio` | Stores Espressif32 platform, packages, toolchains, and libraries |
+| **Build Artifacts** | `F:\smart-pet-assistant-web\firmware\.pio` | Object files, static libraries, ELF, and binary images |
 
----
-
-## 3. Commands Executed During Audit
-
-The following commands were executed to inspect the system environment and test regression stability:
+### 2.2 Storage Footprint Verification
 
 ```powershell
-# 1. Inspect installed developer programs and VS Code extensions
-Get-ChildItem -Path "C:\Users\ADMIN\.vscode\extensions", "C:\Users\ADMIN\AppData\Local\Programs"
-
-# 2. Probe for pio, python, and package managers on PATH
-where.exe python; where.exe pio; where.exe platformio; where.exe git
-
-# 3. Check Python runtimes managed by uv
-C:\Users\ADMIN\.local\bin\uv.exe python list
-
-# 4. Check disk storage on all active drives
 Get-PSDrive -PSProvider FileSystem
+```
 
-# 5. Full automated test suite regression
-npm.cmd test  # 10 test suites, 248 tests passed
+- **Drive C: (System):**
+  - Pre-setup: 166.77 GB used / 6.16 GB free
+  - Post-build: 166.91 GB used / 6.02 GB free (Preserved >6.0 GB headroom; zero packages installed on C:)
+- **Drive F: (Workspace & Toolchains):**
+  - Pre-setup: 33.91 GB used / 15.01 GB free
+  - Post-build: 36.79 GB used / 12.14 GB free (Consumed 2.87 GB for Python, toolchains, and build trees; 12.14 GB free)
 
-# 6. Static code analysis and TypeScript typecheck
-npx.cmd oxlint    # 0 errors, 0 warnings (102 files)
-npx.cmd tsc -b    # 0 type errors
+---
+
+## 3. Exact Commands Executed
+
+The entire toolchain setup, configuration, and compilation process was completed via the following exact command sequence:
+
+```powershell
+# 1. Download and unpack isolated Python 3.11.16 into F:\.toolchains\python
+& "C:\Users\ADMIN\.local\bin\uv.exe" python install 3.11 `
+    --install-dir "F:\.toolchains\python" `
+    --cache-dir "F:\.toolchains\uv-cache"
+
+# 2. Create isolated virtual environment at F:\.toolchains\venv-pio
+& "C:\Users\ADMIN\.local\bin\uv.exe" venv "F:\.toolchains\venv-pio" `
+    --python "F:\.toolchains\python\cpython-3.11.16-windows-x86_64-none\python.exe" `
+    --cache-dir "F:\.toolchains\uv-cache"
+
+# 3. Install PlatformIO Core 6.2.0 into the isolated venv
+& "C:\Users\ADMIN\.local\bin\uv.exe" pip install platformio `
+    --python "F:\.toolchains\venv-pio\Scripts\python.exe" `
+    --cache-dir "F:\.toolchains\uv-cache"
+
+# 4. Verify PlatformIO version
+& "F:\.toolchains\venv-pio\Scripts\pio.exe" --version
+# Output: PlatformIO Core, version 6.2.0
+
+# 5. Run compile-only build for target esp32s3_n8r8
+& "F:\.toolchains\venv-pio\Scripts\pio.exe" run -e esp32s3_n8r8 -d "F:\smart-pet-assistant-web\firmware"
 ```
 
 ---
 
-## 4. Firmware Code Audit & Fixes
+## 4. Configuration & Compiler Errors Resolved
 
-Before attempting compilation, the firmware source code was audited against ESP-IDF / Arduino-esp32 APIs:
+### 4.1 Unrecognized Flag on ESP32-S3: `-mfix-esp32-psram-cache-issue`
+- **Root Cause:** Classic ESP32 (Xtensa LX6) has a silicon bug when accessing PSRAM and internal Flash simultaneously, requiring the compiler flag `-mfix-esp32-psram-cache-issue`. On the ESP32-S3 (Xtensa LX7), this hardware issue does not exist, and `xtensa-esp32s3-elf-gcc` does not recognize the flag.
+- **Resolution:** Removed the flag from `[env:esp32s3_n8r8]` and `[env:esp32s3_n16r8]` in `firmware/platformio.ini`.
 
-### 4.1 Fixed Missing Header in `firmware/src/net_manager.cpp`
-- **Issue:** `net_manager.cpp` called `esp_get_free_heap_size()` while only including `<esp_heap_caps.h>`. On certain Espressif32 compiler toolchain versions, `esp_get_free_heap_size()` is declared strictly in `<esp_system.h>`.
-- **Fix:** Added `#include <esp_system.h>` alongside `<esp_heap_caps.h>`.
+### 4.2 Explicit 8MB / 16MB Partition Schemes
+- **Root Cause:** The base board definition `esp32-s3-devkitc-1` defaults to `default.csv` (configured for 4MB flash). While compiling with `board_upload.flash_size = 8MB`, the binary table risked flash truncation or address mismatches.
+- **Resolution:** Explicitly declared `board_build.partitions = default_8MB.csv` for `n8r8` and `n8r2`, and `board_build.partitions = default_16MB.csv` for `n16r8`.
 
-### 4.2 Verified LovyanGFX SPI & DMA Configuration
-- **File:** `firmware/src/display_hal.cpp`
-- **Bus Host:** `SPI2_HOST` (FSPI on ESP32-S3), avoiding internal SPI flash/PSRAM buses (`SPI1_HOST` / `SPI0_HOST`).
-- **Clock Frequencies:** `TFT_SPI_FREQ_WRITE = 40000000` (40 MHz for 30 FPS updates), `TFT_SPI_FREQ_READ = 16000000`, `TFT_SPI_FREQ_INIT = 20000000`.
-- **Panel Dimensions & Rotation:** Native panel width 240, height 320; rotated to landscape (`TFT_ROTATION = 1`) producing 320×240 coordinates.
-- **Dual Driver Support:** Verified ILI9341 primary configuration with seamless ST7789V fallback switch via `ACTIVE_DISPLAY_CONTROLLER`.
+### 4.3 Redirection of PlatformIO Core to Drive F:
+- **Root Cause:** By default, PlatformIO stores platforms and toolchains in `%USERPROFILE%\.platformio` on Drive C:. With only 6.16 GB free on C:, downloading 2.5+ GB of toolchains was a critical storage risk.
+- **Resolution:** Added `core_dir = F:\.platformio` to `[platformio]` in `firmware/platformio.ini`.
 
-### 4.3 Verified Memory Limits & Safety Bounds
-- **Payload Bound:** `KURO_MAX_PAYLOAD_SIZE = 512` bytes.
-- **Serial Buffer:** `serialBuffer[KURO_MAX_PAYLOAD_SIZE]` indexed via `uint16_t serialBufferIdx` to prevent 8-bit overflow.
-- **Dirty-Region Rendering:** Face animation updates only eyes (56×48 px) and mouth (48×20 px), requiring only **~12.8 KB per frame**, fitting well within internal 512KB SRAM and external 8MB Octal PSRAM.
+### 4.4 Missing System Header in `firmware/src/net_manager.cpp`
+- **Root Cause:** Calling `esp_get_free_heap_size()` in modern Arduino-esp32 requires `<esp_system.h>` in addition to `<esp_heap_caps.h>`.
+- **Resolution:** Added `#include <esp_system.h>` to `net_manager.cpp`.
 
 ---
 
-## 5. Build Environment Setup: Exact Minimal Steps
+## 5. Compiler Output & Memory Metrics
 
-Because PlatformIO is not installed on the system, the user can choose one of the two minimal, sanctioned paths below to enable firmware compilation:
+### 5.1 PlatformIO Compilation Summary Log
 
-### Path A: VS Code PlatformIO IDE Extension (Recommended)
-Because Microsoft VS Code is already installed on this machine, this is the cleanest approach:
-1. Open VS Code:
-   ```powershell
-   & "C:\Users\ADMIN\AppData\Local\Programs\Microsoft VS Code\Code.exe" F:\smart-pet-assistant-web
-   ```
-2. Press `Ctrl+P`, type `ext install platformio.platformio-ide`, and press `Enter`.
-3. Wait 2–3 minutes while PlatformIO installs its isolated portable Python runtime into `%USERPROFILE%\.platformio`.
-4. Open `firmware/` in VS Code and click the **PlatformIO: Build** checkmark icon on the bottom toolbar.
+```text
+Processing esp32s3_n8r8 (platform: espressif32 @ ^6.5.0; board: esp32-s3-devkitc-1; framework: arduino)
+--------------------------------------------------------------------------------
+Platform Manager: Installing espressif32 @ ^6.5.0
+Platform Manager: espressif32@6.13.0 has been installed!
+Tool Manager: toolchain-xtensa-esp32s3@8.4.0+2021r2-patch5 has been installed!
+Tool Manager: toolchain-riscv32-esp@8.4.0+2021r2-patch5 has been installed!
+Tool Manager: framework-arduinoespressif32@3.20017.241212+sha.dcc1105b has been installed!
+Tool Manager: tool-esptoolpy@2.41100.260830 has been installed!
+Tool Manager: tool-scons@4.41101.0 has been installed!
+Library Manager: Installing bblanchon/ArduinoJson @ ^7.0.4 -> ArduinoJson@7.4.3 installed!
+Library Manager: Installing links2004/WebSockets @ ^2.4.1 -> WebSockets@2.7.3 installed!
+Library Manager: Installing lovyan03/LovyanGFX @ ^1.1.12 -> LovyanGFX@1.2.35 installed!
 
-### Path B: CLI Installation via Python 3.11 / pip
-1. Download Python 3.11 or 3.12 installer from [python.org](https://www.python.org/downloads/).
-2. Run installer and check *"Add python.exe to PATH"*.
-3. In PowerShell, install PlatformIO CLI:
-   ```powershell
-   pip install -U platformio
-   ```
-4. Compile the target environment:
-   ```powershell
-   cd F:\smart-pet-assistant-web\firmware
-   pio run -e esp32s3_n8r8
-   ```
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1.html
+PLATFORM: Espressif 32 (6.13.0) > Espressif ESP32-S3-DevKitC-1-N8 (8 MB QD, No PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 8MB Flash
+
+Compiling .pio\build\esp32s3_n8r8\src\display_hal.cpp.o
+Compiling .pio\build\esp32s3_n8r8\src\face_engine.cpp.o
+Compiling .pio\build\esp32s3_n8r8\src\main.cpp.o
+Compiling .pio\build\esp32s3_n8r8\src\net_manager.cpp.o
+Compiling .pio\build\esp32s3_n8r8\src\protocol.cpp.o
+Archiving .pio\build\esp32s3_n8r8\liba8e\libLovyanGFX.a
+Archiving .pio\build\esp32s3_n8r8\lib1f9\libWebSockets.a
+Archiving .pio\build\esp32s3_n8r8\libFrameworkArduino.a
+Linking .pio\build\esp32s3_n8r8\firmware.elf
+
+Retrieving maximum program size .pio\build\esp32s3_n8r8\firmware.elf
+Checking size .pio\build\esp32s3_n8r8\firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [==        ]  15.1% (used 49548 bytes from 327680 bytes)
+Flash: [===       ]  30.1% (used 1007489 bytes from 3342336 bytes)
+Building .pio\build\esp32s3_n8r8\firmware.bin
+esptool.py v4.11.0
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+======================== [SUCCESS] Took 247.52 seconds ========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+esp32s3_n8r8   SUCCESS   00:04:07.518
+========================= 1 succeeded in 00:04:07.518 =========================
+```
+
+### 5.2 Memory Analysis
+- **Internal SRAM (RAM):**
+  - Used: **49,548 bytes** (15.1%)
+  - Free Heap Headroom: **278,132 bytes** (84.9% free)
+  - Result: Huge memory headroom for FreeRTOS tasks, Wi-Fi lwIP buffers, and WebSocket frames.
+- **Flash ROM:**
+  - Used: **1,007,489 bytes** (~0.96 MB, 30.1%)
+  - Application Partition Size: **3,342,336 bytes** (~3.19 MB)
+  - Remaining Application Margin: **2,334,847 bytes** (69.9% free)
+- **External Octal PSRAM:**
+  - 8 MB PSRAM initialized via `-DBOARD_HAS_PSRAM` and `board_build.arduino.memory_type = qio_opi`.
+  - Used dynamically for off-screen sprite buffers and future OTA firmware updates.
 
 ---
 
-## 6. Target Board Assumptions
+## 6. Generated Firmware Binaries
 
-The firmware build configuration relies on the following documented hardware assumptions:
+The compile-only build produced the following verified binaries in `firmware/.pio/build/esp32s3_n8r8/`:
 
-| Parameter | Configuration Value | Justification / Verification Status |
-| :--- | :--- | :--- |
-| **Target Environment** | `esp32s3_n8r8` | Matches recommended `ESP32-S3-WROOM-1-N8R8` (8MB Flash, 8MB Octal PSRAM). |
-| **Flash Mode** | `qio` (8MB) | High-speed Quad I/O Flash. |
-| **PSRAM Type** | `opi` (8MB Octal SPI) | Uses `board_build.arduino.memory_type = qio_opi` and `-DBOARD_HAS_PSRAM`. |
-| **Restricted Pins** | GPIOs 33, 34, 35, 36, 37 | Internally reserved for Octal PSRAM. Completely guarded in pinout. |
-| **Provisional SPI Pins** | CS: 10, RST: 9, DC: 11, MOSI: 12, SCK: 13, BLK: 14 | Provisional FSPI pins; to be confirmed with physical board silkscreen. |
-| **No-PSRAM Fallback** | `esp32s3_no_psram` | Maintained in `platformio.ini` in case the received board has no PSRAM. |
+| File Name | Exact Size (Bytes) | Flash Offset | Description |
+| :--- | :---: | :---: | :--- |
+| **`firmware.bin`** | 1,007,856 bytes | `0x10000` | Application binary (Face engine, protocol, Wi-Fi manager) |
+| **`bootloader.bin`** | 15,104 bytes | `0x0000` | ESP32-S3 second-stage ROM bootloader |
+| **`partitions.bin`** | 3,072 bytes | `0x8000` | 8MB partition table (NVS, OTA data, app0, spiffs) |
+
+*(Note: Zero flash commands were executed; binaries reside purely on disk awaiting physical hardware arrival).*
 
 ---
 
 ## 7. Quality Assurance & Regression Audit
 
-### 7.1 Verification Summary Across All Layers
+Following all configuration and code updates, the complete automated regression suite was re-executed:
 
-| Layer | Tests Executed | Result | Status |
-| :--- | :---: | :---: | :---: |
-| **Host-Side Automated Unit Tests** | 248 | 248 passed, 0 failed | **100% PASS** |
-| **Static Code Linter (`oxlint`)** | 102 files | 0 warnings, 0 errors | **100% PASS** |
-| **TypeScript Type Safety (`tsc -b`)** | Project-wide | 0 type errors | **100% PASS** |
-| **Vite Production Web Build** | Complete client | Minified chunks built in 1.63s | **100% PASS** |
-| **Real PlatformIO Firmware Compilation** | N/A | Blocked (Toolchain uninstalled) | **BLOCKED** |
-| **Physical Device Flashing / Bench Tests** | N/A | Unclaimed (Awaiting hardware delivery) | **PENDING** |
+| Verification Stage | Tool / Command | Result | Details |
+| :--- | :--- | :---: | :--- |
+| **Automated Unit Tests** | `npm test` | **PASS (248/248)** | All 10 suites passing (0 failures) |
+| **Static Code Linter** | `npx oxlint` | **PASS (0 errors)** | 102 files checked across 116 rules |
+| **TypeScript Typecheck** | `npx tsc -b` | **PASS (0 errors)** | Zero type violations |
+| **Web Production Build** | `npx vite build` | **PASS (1.70s)** | Clean client chunk bundling |
+| **Real Firmware Build** | `pio run -e esp32s3_n8r8` | **PASS (SUCCESS)** | Binary images compiled cleanly |
+| **Physical Hardware Flash** | None | **UNCLAIMED** | Awaiting physical board delivery |
 
 ---
 
-## 8. Remaining Hardware Blockers & Next Actionable Steps
+## 8. Remaining Blockers & Next Actionable Steps
 
-1. **Toolchain Installation Approval:**
-   - The user or administrator must approve or perform the installation of PlatformIO (either via VS Code extension or `pip install platformio`).
-2. **Firmware Compilation Execution:**
-   - Once PlatformIO is installed, execute: `pio run -e esp32s3_n8r8` (compile-only; zero hardware flashing).
-3. **Physical Hardware Delivery:**
-   - Await delivery of the physical ESP32-S3 board and 2.4-inch SPI TFT panel to execute the 9-stage bench test protocol documented in Phase 8.3.
-
+1. **Hardware Delivery:**
+   - Await delivery of the physical ESP32-S3-DevKitC-1 development board and 2.4-inch SPI TFT panel.
+2. **Office Bench Wiring & Flashing:**
+   - Follow the 9-stage procedure documented in `docs/PHASE_8_3_HARDWARE_READINESS_REPORT.md`.
+   - Once wiring is confirmed with a multimeter, upload the compiled binary:
+     ```powershell
+     & "F:\.toolchains\venv-pio\Scripts\pio.exe" run -e esp32s3_n8r8 -d "F:\smart-pet-assistant-web\firmware" --target upload
+     ```

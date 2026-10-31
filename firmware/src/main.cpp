@@ -1,14 +1,16 @@
 /**
- * Kuro Robot Companion — ESP32-S3 Firmware Foundation (v0.1.0)
+ * Kuro Robot Companion — Firmware Foundation (v0.1.0)
  *
- * Scope: Phase 8.0 ESP32-S3 Hardware Foundation for 2.4" 320x240 TFT Visor
+ * Supported Hardware:
+ * 1. ESP32-S3 + 2.4" SPI TFT LCD (320x240)
+ * 2. ESP32-WROOM-32 + 0.96" SSD1306 I2C OLED (128x64)
  *
  * ARCHITECTURAL GUARANTEES:
  * 1. Screen-only physical companion: zero motors, zero servos, zero speakers.
  * 2. Non-blocking elapsed-time animation loop (30 FPS target, 33ms intervals).
- * 3. Localized sprite dirty-region updates to conserve SPI bandwidth.
+ * 3. Localized sprite dirty-region updates to conserve bus bandwidth.
  * 4. Resilient Wi-Fi state machine with exponential backoff (never blocks face render).
- * 5. Bounded memory: leverages ESP32-S3 N8R8 8MB Octal PSRAM.
+ * 5. Dynamic memory safety: auto-detects PSRAM or runs cleanly in internal SRAM.
  * 6. Zero hardcoded secrets committed: safe wifi_credentials.h abstraction.
  */
 
@@ -39,10 +41,16 @@ void setup() {
   delay(100);
   Serial.println();
   Serial.println("==================================================");
-  Serial.println("KURO ROBOT COMPANION — ESP32-S3 FIRMWARE FOUNDATION");
+  Serial.println("KURO ROBOT COMPANION — FIRMWARE FOUNDATION");
   Serial.printf("Version:  %s\n", KURO_FIRMWARE_VERSION);
+#if defined(KURO_TARGET_ESP32_WROOM)
+  Serial.printf("Target:   ESP32-WROOM-32 DevKit V1 (38-pin, 4MB Flash)\n");
+  Serial.printf("Display:  0.96\" SSD1306 OLED (%dx%d, I2C SDA=%d SCL=%d Addr=0x%02X)\n",
+                SCREEN_WIDTH, SCREEN_HEIGHT, KURO_PIN_OLED_SDA, KURO_PIN_OLED_SCL, KURO_OLED_I2C_ADDR);
+#else
   Serial.printf("Target:   ESP32-S3 (8MB Flash, 8MB Octal PSRAM)\n");
-  Serial.printf("Display:  2.4\" SPI TFT LCD (%dx%d, Landscape)\n", TFT_SCREEN_WIDTH, TFT_SCREEN_HEIGHT);
+  Serial.printf("Display:  2.4\" SPI TFT LCD (%dx%d, Landscape)\n", SCREEN_WIDTH, SCREEN_HEIGHT);
+#endif
   Serial.println("==================================================");
 #endif
 
@@ -52,14 +60,21 @@ void setup() {
 
   // 2. Render Startup Splash Screen
   display.clear(COLOR_BG_DARK);
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_WHITE);
+  display.drawTextCentered(10, "KURO ROBOT", COLOR_WHITE, 2);
+  display.drawTextCentered(30, "ESP32-WROOM OLED", COLOR_WHITE, 1);
+  display.drawTextCentered(46, "Starting...", COLOR_WHITE, 1);
+#else
   display.drawRoundRect(8, 8, TFT_SCREEN_WIDTH - 16, TFT_SCREEN_HEIGHT - 16, 8, COLOR_PALETTE_CYAN);
   display.drawTextCentered(60, "KURO ROBOT COMPANION", COLOR_PALETTE_CYAN, 2);
   display.drawTextCentered(100, "ESP32-S3 Firmware Foundation", COLOR_WHITE, 1);
   display.drawTextCentered(120, "Visor: 2.4\" TFT 320x240 (Screen-Only)", COLOR_MUTED, 1);
   display.drawTextCentered(150, "Initializing Face Engine & Wi-Fi...", COLOR_STATUS_YELLOW, 1);
+#endif
 
 #ifdef ARDUINO
-  delay(1500); // Only during boot sequence
+  delay(1200); // Only during boot sequence
 #endif
 
   // 3. Initialize Face Engine
@@ -108,7 +123,7 @@ void loop() {
 #endif
   }
 
-  // 4. Handle Incoming Serial JSON Commands (USB-C / WebSerial)
+  // 5. Handle Incoming Serial JSON Commands (USB-C / WebSerial)
 #ifdef ARDUINO
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
@@ -125,4 +140,3 @@ void loop() {
   }
 #endif
 }
-

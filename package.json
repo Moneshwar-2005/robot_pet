@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node test/daily_summary.test.mjs && node test/notifications_automation.test.mjs && node companion/test_companion.mjs && node test/pet_face_animation.test.mjs && node test/autonomous_pet.test.mjs && node test/full_qa_regression.test.mjs && node test/personal_assistant_reliability.test.mjs && node test/activities_and_acceptance.test.mjs && node test/production_readiness_security.test.mjs && node test/esp32_firmware_logic.test.mjs",
+    "test": "node test/daily_summary.test.mjs && node test/notifications_automation.test.mjs && node companion/test_companion.mjs && node test/pet_face_animation.test.mjs && node test/autonomous_pet.test.mjs && node test/full_qa_regression.test.mjs && node test/personal_assistant_reliability.test.mjs && node test/activities_and_acceptance.test.mjs && node test/production_readiness_security.test.mjs && node test/esp32_firmware_logic.test.mjs && node test/complete_application_database_audit.test.mjs && node test/phase_8_5a_acceptance.test.mjs && node test/outbox_isolation_lifecycle.test.mjs && node test/safe_live_cloud_test.mjs && node test/pet_setting_boundary.test.mjs && node test/phase_8_6_live_end_to_end.mjs && node test/phase_8_7_reliability_security.mjs && node test/companion_production_reliability.test.mjs",
     "preview": "vite preview",
     "start": "node src/server/prodServer.mjs"
   },

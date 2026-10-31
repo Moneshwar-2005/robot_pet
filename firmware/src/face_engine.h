@@ -3,13 +3,17 @@
 /**
  * Kuro Robot Companion — Face Animation & Visual Speech Engine
  *
- * Implements procedural digital expressions for the 2.4" 320x240 visor:
+ * Implements procedural digital expressions:
+ * - Visor 1: 2.4" 320x240 Landscape TFT Visor (ESP32-S3)
+ * - Visor 2: 0.96" 128x64 Monochrome OLED Visor (ESP32-WROOM-32)
+ *
+ * Features:
  * - 17 mood states matching web control center
  * - 3 eye shapes (curved, round, pixel)
  * - 4 glow color palettes (cyan, emerald, amber, violet)
  * - 10 mouth geometries + animated speaking phonemes
  * - Non-blocking elapsed-time scheduling (30 FPS target)
- * - Dynamic blinking, breathing oscillation, and visual speech ribbon
+ * - Dynamic blinking, breathing oscillation, and visual speech display
  */
 
 #include <stdint.h>
@@ -66,7 +70,7 @@ public:
   void setMouthStyle(MouthStyleType style);
   MouthStyleType getMouthStyle() const { return _mouthStyle; }
 
-  // Visual Speech Ribbon
+  // Visual Speech Display
   void speak(const char* text, uint32_t durationMs = 0);
   void cancelSpeech();
   bool isSpeaking() const { return _isSpeaking; }
@@ -75,7 +79,19 @@ public:
   void setWifiStatus(uint8_t state, const char* ip = nullptr);
   void triggerManualBlink();
 
-  // Coordinate Layout Constants (320x240 Landscape Visor)
+#if defined(KURO_DISPLAY_SSD1306_OLED)
+  // Coordinate Layout Constants (128x64 Monochrome OLED Visor)
+  static const int16_t EYE_LEFT_X = 38;
+  static const int16_t EYE_RIGHT_X = 90;
+  static const int16_t EYE_BASE_Y = 32;
+  static const int16_t EYE_WIDTH = 24;
+  static const int16_t EYE_HEIGHT = 26;
+  static const int16_t MOUTH_X = 64;
+  static const int16_t MOUTH_BASE_Y = 53;
+  static const int16_t MOUTH_WIDTH = 20;
+  static const int16_t MOUTH_HEIGHT = 8;
+#else
+  // Coordinate Layout Constants (320x240 Landscape TFT Visor)
   static const int16_t EYE_LEFT_X = 96;
   static const int16_t EYE_RIGHT_X = 224;
   static const int16_t EYE_BASE_Y = 88;
@@ -85,6 +101,7 @@ public:
   static const int16_t MOUTH_BASE_Y = 150;
   static const int16_t MOUTH_WIDTH = 48;
   static const int16_t MOUTH_HEIGHT = 20;
+#endif
 
 private:
   DisplayHAL& _disp;
@@ -125,4 +142,3 @@ private:
   void drawEyeGeometry(int16_t cx, int16_t cy, bool isLeft, uint8_t blinkHeight);
   void drawMouthGeometry(int16_t cx, int16_t cy, MouthStyleType style, uint8_t phoneme);
 };
-

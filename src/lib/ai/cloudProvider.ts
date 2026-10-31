@@ -328,6 +328,7 @@ export class CloudAIProvider implements AIProvider {
       const decoder = new TextDecoder('utf-8');
       let accumulated = '';
       let buffer = '';
+      let firstTokenTime: number | null = null;
 
       try {
         while (true) {
@@ -350,6 +351,9 @@ export class CloudAIProvider implements AIProvider {
               const parsed = JSON.parse(jsonStr);
               const delta = parsed?.delta || '';
               if (delta) {
+                if (firstTokenTime === null) {
+                  firstTokenTime = Date.now() - startTime;
+                }
                 accumulated += delta;
                 onChunk(delta, accumulated);
               }
@@ -367,6 +371,7 @@ export class CloudAIProvider implements AIProvider {
         modelUsed: targetModel,
         done: true,
         totalDurationMs: Date.now() - startTime,
+        ttftMs: firstTokenTime !== null ? firstTokenTime : undefined,
       };
     } catch (err: unknown) {
       clearTimeout(timer);

@@ -5,7 +5,8 @@ import type { WorkSummary } from '../types';
 import { initialWorkSummary } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
 import { supabase } from '../lib/supabase';
-import { getOfflineCacheItem, setOfflineCacheItem } from '../lib/offlineDb';
+import { getOfflineCacheItem, setOfflineCacheItem, enqueueOutboxOperation, getOutboxOperationsForScope } from '../lib/offlineDb';
+import { processOutbox } from '../lib/syncEngine';
 
 export const initialWorkSessions: ClientWorkSession[] = [
   {
@@ -164,51 +165,106 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
   }, [user, dbUserId, dbSessions, demoSessions]);
   const activeLoading = user ? (dbUserId === user.id ? loading : true) : false;
 
-  const fetchSessions = useCallback(async (userId: string) => {
-    const currentSeq = ++sequenceRef.current;
-    setError(null);
+  // Reconcile server sessions with pending local outbox operations
+  const reconcileSessions = useCallback(
+    async (userId: string, serverSessions: ClientWorkSession[]): Promise<ClientWorkSession[]> => {
+      try {
+        const ops = await getOutboxOperationsForScope(userId);
+        const sessionOps = ops.filter((o) => o.entityType === 'session');
+        if (sessionOps.length === 0) return serverSessions;
 
-    // 1. Instant offline load from local IndexedDB cache
-    try {
-      const cached = await getOfflineCacheItem<ClientWorkSession[]>(userId, 'work_sessions');
-      if (cached && currentSeq === sequenceRef.current) {
-        setDbSessions(cached);
+        const sessionMap = new Map<string, ClientWorkSession>();
+        for (const s of serverSessions) {
+          sessionMap.set(s.id, s);
+        }
+
+        for (const op of sessionOps) {
+          if (op.action === 'create' && op.payload) {
+            const p = op.payload as {
+              id?: string;
+              title: string;
+              session_type?: 'focus' | 'break' | 'long_break';
+              duration_minutes: number;
+              started_at: string;
+              completed_at?: string;
+              task_id?: string | null;
+            };
+            sessionMap.set(op.entityId, {
+              id: op.entityId,
+              title: p.title,
+              sessionType: p.session_type || 'focus',
+              durationMinutes: p.duration_minutes,
+              startedAt: p.started_at,
+              completedAt: p.completed_at || null,
+              taskId: p.task_id || null,
+              createdAt: op.createdAt,
+            });
+          } else if (op.action === 'delete') {
+            sessionMap.delete(op.entityId);
+          }
+        }
+
+        return Array.from(sessionMap.values()).sort(
+          (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+        );
+      } catch {
+        return serverSessions;
+      }
+    },
+    []
+  );
+
+  const fetchSessions = useCallback(
+    async (userId: string) => {
+      const currentSeq = ++sequenceRef.current;
+      setError(null);
+
+      // 1. Instant offline load from local IndexedDB cache
+      try {
+        const cached = await getOfflineCacheItem<ClientWorkSession[]>(userId, 'work_sessions');
+        if (cached && currentSeq === sequenceRef.current) {
+          setDbSessions(cached);
+          setDbUserId(userId);
+          setLoading(false);
+        }
+      } catch {
+        // Fallback gracefully
+      }
+
+      if (!supabase) return;
+
+      try {
+        const { data, error: fetchErr } = await supabase
+          .from('work_sessions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('started_at', { ascending: false });
+
+        if (currentSeq !== sequenceRef.current) return;
+
+        if (fetchErr) {
+          setError('Offline or server unreachable. Showing cached work sessions.');
+        } else {
+          const clientSessions = (data || []).map(workSessionRowToClient);
+          const reconciled = await reconcileSessions(userId, clientSessions);
+          if (currentSeq === sequenceRef.current) {
+            setDbSessions(reconciled);
+            setDbUserId(userId);
+            void setOfflineCacheItem(userId, 'work_sessions', reconciled);
+          }
+        }
+      } catch {
+        if (currentSeq !== sequenceRef.current) return;
+        setError('Network offline. Showing cached work sessions.');
         setDbUserId(userId);
-        setLoading(false);
+      } finally {
+        if (currentSeq === sequenceRef.current) {
+          setLoading(false);
+        }
       }
-    } catch {
-      // Fallback gracefully
-    }
-
-    if (!supabase) return;
-
-    try {
-      const { data, error: fetchErr } = await supabase
-        .from('work_sessions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('started_at', { ascending: false });
-
-      if (currentSeq !== sequenceRef.current) return;
-
-      if (fetchErr) {
-        setError('Offline or server unreachable. Showing cached work sessions.');
-      } else {
-        const clientSessions = (data || []).map(workSessionRowToClient);
-        setDbSessions(clientSessions);
-        setDbUserId(userId);
-        void setOfflineCacheItem(userId, 'work_sessions', clientSessions);
-      }
-    } catch {
-      if (currentSeq !== sequenceRef.current) return;
-      setError('Network offline. Showing cached work sessions.');
-      setDbUserId(userId);
-    } finally {
-      if (currentSeq === sequenceRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
+    },
+    [reconcileSessions]
+  );
 
   // Handle user authentication transitions
   useEffect(() => {
@@ -249,7 +305,7 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       setError(null);
 
       // Local demo mode
-      if (!user || !supabase) {
+      if (!user) {
         const newSess: ClientWorkSession = {
           id: `sess-${Date.now()}`,
           title: data.title.trim(),
@@ -264,32 +320,49 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         return true;
       }
 
-      // Authenticated persistence: enforce required completed_at
+      // Authenticated local-first persistence with outbox queue
+      const sessionId = crypto.randomUUID();
       const completedAt = data.completedAt || new Date().toISOString();
-      const sessionPayload = { ...data, completedAt };
+      const clientSess: ClientWorkSession = {
+        id: sessionId,
+        title: data.title.trim(),
+        sessionType: data.sessionType || 'focus',
+        durationMinutes: data.durationMinutes,
+        startedAt: data.startedAt,
+        completedAt,
+        taskId: data.taskId || null,
+        createdAt: new Date().toISOString(),
+      };
+
+      setDbSessions((prev) => {
+        const next = [clientSess, ...prev];
+        void setOfflineCacheItem(user.id, 'work_sessions', next);
+        return next;
+      });
 
       try {
-        const payload = workSessionToInsertPayload(sessionPayload, user.id);
-        const { data: created, error: insertErr } = await supabase
-          .from('work_sessions')
-          .insert(payload)
-          .select('*')
-          .single();
-
-        if (insertErr || !created) {
-          setError(insertErr?.message || 'Failed to save work session to server.');
-          return false;
-        }
-
-        const clientSess = workSessionRowToClient(created);
-        setDbSessions((prev) => {
-          const next = [clientSess, ...prev];
-          void setOfflineCacheItem(user.id, 'work_sessions', next);
-          return next;
+        const payload = workSessionToInsertPayload(
+          { ...data, id: sessionId, completedAt },
+          user.id
+        );
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'session',
+          entityId: sessionId,
+          action: 'create',
+          payload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
         });
+
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setError('Network offline. Work session could not be saved to server.');
+      } catch (err) {
+        console.warn('[useWorkSessions] Failed to enqueue work session create outbox op:', err);
+        setError('Failed to queue work session locally.');
         return false;
       }
     },
@@ -301,12 +374,12 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       setError(null);
 
       // Local demo mode
-      if (!user || !supabase) {
+      if (!user) {
         setDemoSessions((prev) => prev.filter((s) => s.id !== id));
         return true;
       }
 
-      // Optimistic delete with targeted rollback
+      // Optimistic delete with outbox queue
       const target = dbSessions.find((s) => s.id === id);
       if (!target) return false;
       const nextSessions = dbSessions.filter((s) => s.id !== id);
@@ -314,24 +387,23 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       void setOfflineCacheItem(user.id, 'work_sessions', nextSessions);
 
       try {
-        const { error: deleteErr } = await supabase
-          .from('work_sessions')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', user.id);
+        await enqueueOutboxOperation({
+          id: crypto.randomUUID(),
+          scope: user.id,
+          entityType: 'session',
+          entityId: id,
+          action: 'delete',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'pending',
+          retryCount: 0,
+        });
 
-        if (deleteErr) {
-          setDbSessions((prev) => (prev.some((s) => s.id === id) ? prev : [target, ...prev]));
-          void setOfflineCacheItem(user.id, 'work_sessions', dbSessions);
-          setError(deleteErr.message || 'Failed to delete work session from server.');
-          return false;
-        }
-
+        void processOutbox(user.id);
         return true;
-      } catch {
-        setDbSessions((prev) => (prev.some((s) => s.id === id) ? prev : [target, ...prev]));
-        void setOfflineCacheItem(user.id, 'work_sessions', dbSessions);
-        setError('Network offline. Work session deletion could not be saved to server.');
+      } catch (err) {
+        console.warn('[useWorkSessions] Failed to enqueue work session delete outbox op:', err);
+        setError('Failed to queue work session deletion locally.');
         return false;
       }
     },

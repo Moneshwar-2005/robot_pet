@@ -34,9 +34,9 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-COMPANION_PORT = int(os.environ.get("KURO_COMPANION_PORT", "48199"))
+COMPANION_PORT = int(os.environ.get("KURO_COMPANION_PORT", "48299"))
 COMPANION_HOST = "127.0.0.1"
-COMPANION_VERSION = "1.2.0"
+COMPANION_VERSION = "1.3.0"
 MAX_BODY_BYTES = 64 * 1024
 
 DEFAULT_ALLOWED_ORIGINS = {
@@ -55,8 +55,10 @@ ALLOWED_ORIGINS = DEFAULT_ALLOWED_ORIGINS | custom_origins
 
 DIR_PATH = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE_PATH = os.path.join(DIR_PATH, ".session_token")
+PIN_FILE_PATH = os.path.join(DIR_PATH, ".session_pin")
 DEFAULT_SESSIONS_STORAGE_FILE = os.path.join(DIR_PATH, ".sessions_history.json")
 SESSION_TOKEN = secrets.token_hex(16)
+PAIRING_PIN = f"{secrets.randbelow(900000) + 100000}"
 START_TIME = time.time()
 SESSION_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
@@ -65,9 +67,14 @@ SUPPORTED_IDES = [
     {"id": "vscode", "name": "Visual Studio Code", "exe": "Code.exe"},
     {"id": "visualstudio", "name": "Visual Studio", "exe": "devenv.exe"},
     {"id": "cursor", "name": "Cursor", "exe": "Cursor.exe"},
+    {"id": "windsurf", "name": "Windsurf", "exe": "Windsurf.exe"},
+    {"id": "zed", "name": "Zed", "exe": "zed.exe"},
     {"id": "idea", "name": "IntelliJ IDEA", "exe": "idea64.exe"},
     {"id": "pycharm", "name": "PyCharm", "exe": "pycharm64.exe"},
     {"id": "webstorm", "name": "WebStorm", "exe": "webstorm64.exe"},
+    {"id": "clion", "name": "CLion", "exe": "clion64.exe"},
+    {"id": "rider", "name": "Rider", "exe": "rider64.exe"},
+    {"id": "androidstudio", "name": "Android Studio", "exe": "studio64.exe"},
     {"id": "sublime", "name": "Sublime Text", "exe": "sublime_text.exe"},
 ]
 
@@ -76,6 +83,8 @@ def cleanup_token_file():
     try:
         if os.path.exists(TOKEN_FILE_PATH):
             os.remove(TOKEN_FILE_PATH)
+        if os.path.exists(PIN_FILE_PATH):
+            os.remove(PIN_FILE_PATH)
     except Exception:
         pass
 
@@ -83,10 +92,13 @@ def cleanup_token_file():
 try:
     with open(TOKEN_FILE_PATH, "w", encoding="utf-8") as f:
         f.write(SESSION_TOKEN)
+    with open(PIN_FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(PAIRING_PIN)
     if hasattr(os, "chmod"):
         os.chmod(TOKEN_FILE_PATH, 0o600)
+        os.chmod(PIN_FILE_PATH, 0o600)
 except Exception as e:
-    print(f"[Kuro Companion] Note: Could not write .session_token: {e}", file=sys.stderr)
+    print(f"[Kuro Companion] Note: Could not write credentials: {e}", file=sys.stderr)
 
 
 def parse_csv_line(line: str):
