@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ClientWorkSession } from '../lib/adapters';
-import { workSessionRowToClient, workSessionToInsertPayload } from '../lib/adapters';
+import {
+  workSessionRowToClient,
+  timeEntryRowToTimeEntry,
+  timeEntryToWorkSession,
+  timeEntryToInsertPayload,
+} from '../lib/adapters';
 import type { WorkSummary } from '../types';
 import { initialWorkSummary } from '../data/mockData';
 import { useAuth } from '../context/useAuth';
@@ -170,35 +175,61 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
     async (userId: string, serverSessions: ClientWorkSession[]): Promise<ClientWorkSession[]> => {
       try {
         const ops = await getOutboxOperationsForScope(userId);
-        const sessionOps = ops.filter((o) => o.entityType === 'session');
-        if (sessionOps.length === 0) return serverSessions;
+        const relevantOps = ops.filter((o) => o.entityType === 'session' || o.entityType === 'time_entry');
+        if (relevantOps.length === 0) return serverSessions;
 
         const sessionMap = new Map<string, ClientWorkSession>();
         for (const s of serverSessions) {
           sessionMap.set(s.id, s);
         }
 
-        for (const op of sessionOps) {
+        for (const op of relevantOps) {
           if (op.action === 'create' && op.payload) {
-            const p = op.payload as {
-              id?: string;
-              title: string;
-              session_type?: 'focus' | 'break' | 'long_break';
-              duration_minutes: number;
-              started_at: string;
-              completed_at?: string;
-              task_id?: string | null;
-            };
-            sessionMap.set(op.entityId, {
-              id: op.entityId,
-              title: p.title,
-              sessionType: p.session_type || 'focus',
-              durationMinutes: p.duration_minutes,
-              startedAt: p.started_at,
-              completedAt: p.completed_at || null,
-              taskId: p.task_id || null,
-              createdAt: op.createdAt,
-            });
+            if (op.entityType === 'time_entry') {
+              const p = op.payload as {
+                id?: string;
+                task_id?: string | null;
+                started_at: string;
+                ended_at?: string;
+                active_duration_seconds?: number;
+                state?: string;
+              };
+              if (p.state === 'completed' || p.ended_at) {
+                const durationMinutes = Math.max(1, Math.round((p.active_duration_seconds ?? 0) / 60));
+                sessionMap.set(op.entityId, {
+                  id: op.entityId,
+                  title: p.task_id ? 'Task Focus Session' : 'Deep Work Session',
+                  sessionType: 'focus',
+                  durationMinutes,
+                  startedAt: p.started_at,
+                  completedAt: p.ended_at || null,
+                  taskId: p.task_id || null,
+                  createdAt: op.createdAt,
+                  isNormalized: true,
+                });
+              }
+            } else {
+              const p = op.payload as {
+                id?: string;
+                title: string;
+                session_type?: 'focus' | 'break' | 'long_break';
+                duration_minutes: number;
+                started_at: string;
+                completed_at?: string;
+                task_id?: string | null;
+              };
+              sessionMap.set(op.entityId, {
+                id: op.entityId,
+                title: p.title,
+                sessionType: p.session_type || 'focus',
+                durationMinutes: p.duration_minutes,
+                startedAt: p.started_at,
+                completedAt: p.completed_at || null,
+                taskId: p.task_id || null,
+                createdAt: op.createdAt,
+                isNormalized: false,
+              });
+            }
           } else if (op.action === 'delete') {
             sessionMap.delete(op.entityId);
           }
@@ -234,19 +265,36 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       if (!supabase) return;
 
       try {
-        const { data, error: fetchErr } = await supabase
-          .from('work_sessions')
-          .select('*')
-          .eq('user_id', userId)
-          .order('started_at', { ascending: false });
+        const [legacyRes, timeEntriesRes] = await Promise.all([
+          supabase
+            .from('work_sessions')
+            .select('*')
+            .eq('user_id', userId)
+            .order('started_at', { ascending: false }),
+          supabase
+            .from('time_entries')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('state', 'completed')
+            .order('started_at', { ascending: false }),
+        ]);
 
         if (currentSeq !== sequenceRef.current) return;
 
-        if (fetchErr) {
+        if (legacyRes.error && timeEntriesRes.error) {
           setError('Offline or server unreachable. Showing cached work sessions.');
         } else {
-          const clientSessions = (data || []).map(workSessionRowToClient);
-          const reconciled = await reconcileSessions(userId, clientSessions);
+          const legacyClient = (legacyRes.data || []).map(workSessionRowToClient);
+          const normalizedClient = (timeEntriesRes.data || []).map((row) =>
+            timeEntryToWorkSession(timeEntryRowToTimeEntry(row))
+          );
+
+          // Combine both without duplicates and sort by startedAt descending
+          const combined = [...normalizedClient, ...legacyClient].sort(
+            (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+          );
+
+          const reconciled = await reconcileSessions(userId, combined);
           if (currentSeq === sequenceRef.current) {
             setDbSessions(reconciled);
             setDbUserId(userId);
@@ -320,9 +368,12 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         return true;
       }
 
-      // Authenticated local-first persistence with outbox queue
+      // Authenticated local-first persistence with outbox queue:
+      // Uses Phase 9 normalized time_entries table as the single source of truth for new timer sessions
       const sessionId = crypto.randomUUID();
       const completedAt = data.completedAt || new Date().toISOString();
+      const durationSeconds = Math.max(0, data.durationMinutes * 60);
+
       const clientSess: ClientWorkSession = {
         id: sessionId,
         title: data.title.trim(),
@@ -332,6 +383,7 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         completedAt,
         taskId: data.taskId || null,
         createdAt: new Date().toISOString(),
+        isNormalized: true,
       };
 
       setDbSessions((prev) => {
@@ -341,17 +393,29 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
       });
 
       try {
-        const payload = workSessionToInsertPayload(
-          { ...data, id: sessionId, completedAt },
+        const insertPayload = timeEntryToInsertPayload(
+          {
+            id: sessionId,
+            userId: user.id,
+            taskId: data.taskId || null,
+            projectId: null,
+            startedAt: data.startedAt,
+            endedAt: completedAt,
+            activeDurationSeconds: durationSeconds,
+            idleDurationSeconds: 0,
+            trackingSource: data.sessionType === 'break' ? 'manual' : 'pomodoro',
+            state: 'completed',
+          },
           user.id
         );
+
         await enqueueOutboxOperation({
           id: crypto.randomUUID(),
           scope: user.id,
-          entityType: 'session',
+          entityType: 'time_entry',
           entityId: sessionId,
           action: 'create',
-          payload,
+          payload: insertPayload,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           status: 'pending',
@@ -361,7 +425,7 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         void processOutbox(user.id);
         return true;
       } catch (err) {
-        console.warn('[useWorkSessions] Failed to enqueue work session create outbox op:', err);
+        console.warn('[useWorkSessions] Failed to enqueue time entry create outbox op:', err);
         setError('Failed to queue work session locally.');
         return false;
       }
@@ -390,7 +454,7 @@ export function useWorkSessions(tasksCompletedCount = 0, totalTasksCount = 0): U
         await enqueueOutboxOperation({
           id: crypto.randomUUID(),
           scope: user.id,
-          entityType: 'session',
+          entityType: target.isNormalized ? 'time_entry' : 'session',
           entityId: id,
           action: 'delete',
           createdAt: new Date().toISOString(),

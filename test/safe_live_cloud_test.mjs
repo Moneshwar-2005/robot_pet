@@ -280,6 +280,11 @@ async function runSafeLiveCloudTest() {
 
   // 4. tasks table
   try {
+    // Resolve workspace containers for Phase 9 hierarchy compliance
+    const { data: userProjs } = await supabase.from('projects').select('id').eq('user_id', userId).limit(1);
+    const { data: userBoards } = await supabase.from('project_boards').select('id').eq('user_id', userId).limit(1);
+    const { data: userCols } = await supabase.from('board_columns').select('id').eq('user_id', userId).eq('status_category', 'todo').limit(1);
+
     const taskTitle = `${testBatchTag} Initial Task`;
     const { data: insTask, error: insErr } = await supabase.from('tasks').insert({
       user_id: userId,
@@ -287,6 +292,9 @@ async function runSafeLiveCloudTest() {
       category: 'work',
       priority: 'high',
       completed: false,
+      project_id: userProjs?.[0]?.id || null,
+      board_id: userBoards?.[0]?.id || null,
+      column_id: userCols?.[0]?.id || null,
     }).select().single();
     if (insErr) throw insErr;
 

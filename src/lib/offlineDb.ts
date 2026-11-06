@@ -268,6 +268,33 @@ export async function clearScopeCache(scope: string): Promise<void> {
 /* OUTBOX SYNCHRONIZATION OPERATIONS                                         */
 /* ========================================================================= */
 
+let monotonicSequenceCounter = Date.now();
+
+export function getNextOutboxSequence(): number {
+  return ++monotonicSequenceCounter;
+}
+
+export const ENTITY_HIERARCHY_PRIORITY: Record<OutboxEntityType, number> = {
+  project: 10,
+  project_board: 20,
+  board_column: 30,
+  task_label: 35,
+  task: 40,
+  task_label_assignment: 45,
+  time_entry: 50,
+  time_entry_pause: 55,
+  time_entry_idle: 56,
+  computer_activity_event: 60,
+  pet_reaction_log: 65,
+  daily_report: 70,
+  reminder: 80,
+  memory: 85,
+  session: 90,
+  pet_setting: 92,
+  preference: 94,
+  routine: 96,
+};
+
 /**
  * Enqueues a synchronization operation into the outbox.
  * Idempotently merges operations on the same entity when appropriate:
@@ -278,12 +305,17 @@ export async function enqueueOutboxOperation(op: OutboxOperation): Promise<void>
   const db = await getOfflineDb();
   if (!db) return;
 
+  const operationToSave: OutboxOperation = {
+    ...op,
+    sequenceNumber: typeof op.sequenceNumber === 'number' ? op.sequenceNumber : getNextOutboxSequence(),
+  };
+
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORES.SYNC_OUTBOX, 'readwrite');
       const store = tx.objectStore(STORES.SYNC_OUTBOX);
       const index = store.index('by_scope');
-      const request = index.openCursor(IDBKeyRange.only(op.scope));
+      const request = index.openCursor(IDBKeyRange.only(operationToSave.scope));
 
       const existingOps: OutboxOperation[] = [];
 
@@ -291,13 +323,13 @@ export async function enqueueOutboxOperation(op: OutboxOperation): Promise<void>
         const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
           const item = cursor.value as OutboxOperation;
-          if (item.entityType === op.entityType && item.entityId === op.entityId) {
+          if (item.entityType === operationToSave.entityType && item.entityId === operationToSave.entityId) {
             existingOps.push(item);
           }
           cursor.continue();
         } else {
           // Reconcile with existing ops on same entity
-          if (op.action === 'delete') {
+          if (operationToSave.action === 'delete') {
             const hasPendingCreate = existingOps.some((e) => e.action === 'create');
             if (hasPendingCreate) {
               // Entity was created locally and deleted before reaching server. Delete all ops for it.
@@ -310,32 +342,55 @@ export async function enqueueOutboxOperation(op: OutboxOperation): Promise<void>
             for (const e of existingOps) {
               store.delete(e.id);
             }
-            store.put(op);
-          } else if (op.action === 'update') {
-            const pendingCreate = existingOps.find((e) => e.action === 'create');
-            if (pendingCreate) {
-              // Merge update payload into the pending create
-              const mergedPayload = {
-                ...(pendingCreate.payload as Record<string, unknown>),
-                ...(op.payload as Record<string, unknown>),
-              };
-              store.put({
-                ...pendingCreate,
-                payload: mergedPayload,
-                updatedAt: new Date().toISOString(),
-              });
-              return;
-            }
-            // Remove previous pending update ops and put new one
-            for (const e of existingOps) {
-              if (e.action === 'update') {
-                store.delete(e.id);
+            store.put(operationToSave);
+          } else if (operationToSave.action === 'update') {
+            const isTimerLifecycle = operationToSave.entityType === 'time_entry';
+
+            if (!isTimerLifecycle) {
+              const pendingCreate = existingOps.find((e) => e.action === 'create');
+              if (pendingCreate) {
+                // Merge update payload into the pending create for non-timer entities
+                const mergedPayload = {
+                  ...(pendingCreate.payload as Record<string, unknown>),
+                  ...(operationToSave.payload as Record<string, unknown>),
+                };
+                store.put({
+                  ...pendingCreate,
+                  payload: mergedPayload,
+                  updatedAt: new Date().toISOString(),
+                });
+                return;
               }
+              // Remove previous pending update ops and put new one
+              for (const e of existingOps) {
+                if (e.action === 'update') {
+                  store.delete(e.id);
+                }
+              }
+              store.put(operationToSave);
+            } else {
+              // For time_entry: preserve discrete lifecycle operations.
+              // Never collapse completed state / endedAt into pending create.
+              // Keeps initial CREATE -> child interval CREATE/UPDATE -> parent completion UPDATE.
+              store.put(operationToSave);
             }
-            store.put(op);
           } else {
             // Create action
-            store.put(op);
+            if (operationToSave.entityType === 'daily_report') {
+              const pendingReportCreate = existingOps.find(
+                (e) => e.action === 'create' && e.status === 'pending'
+              );
+              if (pendingReportCreate) {
+                // Update existing pending create with newer payload to avoid duplicate outbox operations
+                store.put({
+                  ...pendingReportCreate,
+                  payload: operationToSave.payload,
+                  updatedAt: operationToSave.updatedAt || new Date().toISOString(),
+                });
+                return;
+              }
+            }
+            store.put(operationToSave);
           }
         }
       };
@@ -353,8 +408,91 @@ export async function enqueueOutboxOperation(op: OutboxOperation): Promise<void>
 }
 
 /**
+ * Assigns an operation-aware lifecycle ranking to ensure deterministic synchronization ordering:
+ * - Parent creation precedes child creation (time_entry CREATE rank 10 < child CREATE rank 25)
+ * - Idle closure precedes pause creation during manual pause (idle UPDATE rank 20 < pause CREATE rank 25)
+ * - Child interval closure precedes parent completion (child UPDATE rank 20/30 < time_entry completed rank 50)
+ * - Intermediate state transitions (paused/running rank 40) precede final completion (rank 50)
+ */
+export function getOperationLifecycleRank(op: OutboxOperation): number {
+  if (op.entityType === 'time_entry') {
+    if (op.action === 'create') return 10;
+    if (op.action === 'update') {
+      const payload = op.payload as Record<string, unknown> | undefined;
+      const isCompletion = payload?.state === 'completed' || Boolean(payload?.ended_at);
+      return isCompletion ? 50 : 40;
+    }
+  }
+
+  if (op.entityType === 'time_entry_idle') {
+    if (op.action === 'update') return 20; // Idle closure precedes pause creation
+    if (op.action === 'create') return 25;
+  }
+
+  if (op.entityType === 'time_entry_pause') {
+    if (op.action === 'create') return 25;
+    if (op.action === 'update') return 30; // Pause closure precedes timer completion
+  }
+
+  return 25;
+}
+
+/**
+ * Deterministically compares two outbox operations for execution order:
+ * 1. Timestamp (FIFO)
+ * 2. Operation-aware lifecycle priority
+ * 3. Monotonic sequence tie-breaker
+ * 4. Entity hierarchy priority (project -> board -> column -> task -> others)
+ * 5. Stable ID tie-breaker
+ */
+export function compareOutboxOperations(a: OutboxOperation, b: OutboxOperation): number {
+  // 1. Primary ordering: Timestamp (FIFO)
+  const timeA = new Date(a.createdAt).getTime();
+  const timeB = new Date(b.createdAt).getTime();
+  if (timeA !== timeB) {
+    return timeA - timeB;
+  }
+
+  // 2. Operation-aware lifecycle ranking (parent create < child create < child close < parent complete)
+  const rankA = getOperationLifecycleRank(a);
+  const rankB = getOperationLifecycleRank(b);
+  if (rankA !== rankB) {
+    return rankA - rankB;
+  }
+
+  // 3. Monotonic sequence tie-breaker
+  const seqA = typeof a.sequenceNumber === 'number' ? a.sequenceNumber : 0;
+  const seqB = typeof b.sequenceNumber === 'number' ? b.sequenceNumber : 0;
+  if (seqA !== seqB) {
+    return seqA - seqB;
+  }
+
+  // 4. Entity hierarchy priority (project -> board -> column -> task -> others)
+  const prioA = ENTITY_HIERARCHY_PRIORITY[a.entityType] ?? 99;
+  const prioB = ENTITY_HIERARCHY_PRIORITY[b.entityType] ?? 99;
+  if (prioA !== prioB) {
+    return prioA - prioB;
+  }
+
+  // 5. Stable deterministic tie-breaker
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * Sorts an array of outbox operations using the canonical deterministic comparator.
+ */
+export function sortOutboxOperations(ops: OutboxOperation[]): OutboxOperation[] {
+  return [...ops].sort(compareOutboxOperations);
+}
+
+/**
  * Retrieves all outbox operations for a specific scope (userId).
- * Returns operations sorted by createdAt ascending (FIFO).
+ * Returns operations sorted deterministically:
+ * 1. Timestamp (FIFO)
+ * 2. Operation-aware lifecycle ranking
+ * 3. Monotonic sequence number
+ * 4. Entity hierarchy priority (project -> board -> column -> task -> others)
+ * 5. Stable ID tie-breaker
  */
 export async function getOutboxOperationsForScope(scope: string): Promise<OutboxOperation[]> {
   const db = await getOfflineDb();
@@ -369,13 +507,56 @@ export async function getOutboxOperationsForScope(scope: string): Promise<Outbox
 
       request.onsuccess = () => {
         const results = (request.result || []) as OutboxOperation[];
-        results.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        results.sort(compareOutboxOperations);
         resolve(results);
       };
 
       request.onerror = () => resolve([]);
     } catch {
       resolve([]);
+    }
+  });
+}
+
+/**
+ * Resets failed outbox operations for a given scope back to pending with retryCount reset.
+ * Used for recovery when the user clicks Retry or when parent dependencies have resolved.
+ */
+export async function resetFailedOutboxOperationsForScope(scope: string): Promise<number> {
+  const db = await getOfflineDb();
+  if (!db) return 0;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORES.SYNC_OUTBOX, 'readwrite');
+      const store = tx.objectStore(STORES.SYNC_OUTBOX);
+      const index = store.index('by_scope');
+      const request = index.openCursor(IDBKeyRange.only(scope));
+      let resetCount = 0;
+
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          const item = cursor.value as OutboxOperation;
+          if (item.status === 'failed') {
+            cursor.update({
+              ...item,
+              status: 'pending',
+              retryCount: 0,
+              lastError: null,
+              updatedAt: new Date().toISOString(),
+            });
+            resetCount++;
+          }
+          cursor.continue();
+        } else {
+          resolve(resetCount);
+        }
+      };
+
+      request.onerror = () => resolve(0);
+    } catch {
+      resolve(0);
     }
   });
 }

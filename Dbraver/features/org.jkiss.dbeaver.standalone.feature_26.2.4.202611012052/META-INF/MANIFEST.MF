@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Java-Version: 21
+Build-Jdk-Spec: 25
+Build-Time: 202611012052
+Built-By: dbeaver.io
+Created-By: dbeaver.io
+

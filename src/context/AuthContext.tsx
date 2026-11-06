@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { setActiveSyncUser } from '../lib/syncEngine';
 import { clearScopeCache } from '../lib/offlineDb';
+import { ensureUserWorkspaceContainers, clearWorkspaceContainersCache } from '../services/workspaceService';
 import { AuthContext } from './authContextDef';
 import type { User, Session } from '@supabase/supabase-js';
 import type { AuthContextType } from './authContextDef';
@@ -35,6 +36,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setSession(initialSession);
           setUser(initialSession?.user ?? null);
           setActiveSyncUser(initialSession?.user?.id ?? null);
+          if (initialSession?.user?.id) {
+            void ensureUserWorkspaceContainers(initialSession.user.id).catch((err) => {
+              console.warn('[Kuro Auth] Workspace bootstrap error:', err);
+            });
+          }
         }
         setLoading(false);
       })
@@ -56,6 +62,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const newUser = newSession?.user ?? null;
       setUser(newUser);
       setActiveSyncUser(newUser?.id ?? null);
+      if (newUser?.id) {
+        void ensureUserWorkspaceContainers(newUser.id).catch((err) => {
+          console.warn('[Kuro Auth] Workspace bootstrap on state change error:', err);
+        });
+      }
       setLoading(false);
     });
 
@@ -114,6 +125,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = useCallback(async () => {
     const currentUserId = user?.id;
     setActiveSyncUser(null);
+    if (currentUserId) {
+      clearWorkspaceContainersCache(currentUserId);
+    }
     if (!isClientConfigured || !supabase) {
       if (currentUserId) {
         void clearScopeCache(currentUserId);

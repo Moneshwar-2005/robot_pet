@@ -1,5 +1,5 @@
 /**
- * Kuro Synchronization Engine — Step 3.5
+ * Kuro Synchronization Engine — Step 3.5 & Phase 10 Extension
  *
  * Coordinates durable offline operations with Supabase.
  * - Idempotent writes via client-generated UUIDs and upsert
@@ -15,9 +15,11 @@ import {
   deleteOutboxOperation,
   updateOutboxOperation,
   getPendingOutboxCount,
+  resetFailedOutboxOperationsForScope,
 } from './offlineDb';
 import type { OutboxOperation, SyncState, OutboxEntityType } from '../types/sync';
 import type { TablesInsert, TablesUpdate } from '../types/database';
+import { ensureUserWorkspaceContainers } from '../services/workspaceService';
 
 type SyncListener = (state: SyncState) => void;
 type EntitySyncListener = (entityType: OutboxEntityType, entityId: string, status: 'synced' | 'sync-error') => void;
@@ -90,20 +92,71 @@ export function setActiveSyncUser(userId: string | null) {
   }
 }
 
-function isPermanentError(error: { code?: string; message?: string } | null | undefined): boolean {
+export function isPermanentError(
+  error: { code?: string; message?: string } | null | undefined,
+  retryCount = 0
+): boolean {
   if (!error) return false;
+
+  const isForeignKeyViolation =
+    error.code === '23503' ||
+    Boolean(
+      error.message &&
+        (error.message.includes('foreign key constraint') ||
+          error.message.includes('fk_boards_project') ||
+          error.message.includes('fk_columns_board') ||
+          error.message.includes('fk_pause_time_entry') ||
+          error.message.includes('fk_idle_time_entry') ||
+          error.message.includes('fk_time_entry_task') ||
+          error.message.includes('fk_time_entry_project'))
+    );
+
+  // Foreign key violations may be transient if a parent resource is still synchronizing.
+  // Allow bounded retries (up to 5 attempts) before treating as genuinely unresolvable.
+  if (isForeignKeyViolation) {
+    return retryCount >= 5;
+  }
+
+  // Cross-device running timer collision is recoverable (can retry as paused)
+  if (
+    error.code === '23505' &&
+    Boolean(
+      error.message?.includes('idx_unique_running_timer_per_user') ||
+        error.message?.includes('running')
+    )
+  ) {
+    return false;
+  }
+
+  // PostgreSQL SQLSTATE 22 (data exception), 23 (integrity constraint violations other than 23503), 42 (syntax/access rule)
   if (error.code && /^(22|23|42)/.test(error.code)) {
     return true;
   }
-  if (error.message && (
-    error.message.includes('JWT') ||
-    error.message.includes('violates') ||
-    error.message.includes('invalid input') ||
-    error.message.includes('permission denied')
-  )) {
+
+  if (
+    error.message &&
+    (error.message.includes('JWT') ||
+      error.message.includes('invalid input') ||
+      error.message.includes('permission denied') ||
+      (error.message.includes('violates') && !error.message.includes('foreign key')))
+  ) {
     return true;
   }
+
   return false;
+}
+
+/**
+ * Resets any failed outbox operations for this user and triggers synchronization.
+ * Provides a clear recovery path when parent resources have been restored.
+ */
+export async function retryFailedOutboxOperations(userId: string): Promise<number> {
+  if (!userId) return 0;
+  const count = await resetFailedOutboxOperationsForScope(userId);
+  if (count > 0) {
+    void processOutbox(userId);
+  }
+  return count;
 }
 
 /**
@@ -123,13 +176,29 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
   try {
     if (op.entityType === 'task') {
       if (op.action === 'create') {
-        const payload = op.payload as TablesInsert<'tasks'>;
+        let payload = op.payload as TablesInsert<'tasks'>;
+        if (!payload.project_id || !payload.board_id || !payload.column_id) {
+          try {
+            const containers = await ensureUserWorkspaceContainers(op.scope);
+            payload = {
+              ...payload,
+              project_id: payload.project_id || containers.project.id,
+              board_id: payload.board_id || containers.board.id,
+              column_id:
+                payload.column_id ||
+                (payload.completed ? containers.columns.done.id : containers.columns.todo.id),
+              status: payload.status || (payload.completed ? 'done' : 'todo'),
+            };
+          } catch (err) {
+            console.warn('[Kuro SyncEngine] Container auto-enrichment warning:', err);
+          }
+        }
         const { error } = await supabase
           .from('tasks')
           .upsert(payload, { onConflict: 'id' });
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -144,7 +213,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -158,7 +227,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -173,7 +242,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .upsert(payload, { onConflict: 'id' });
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -188,7 +257,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -202,7 +271,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -217,7 +286,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .upsert(payload, { onConflict: 'id' });
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -232,7 +301,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -246,7 +315,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -261,7 +330,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .upsert(payload, { onConflict: 'id' });
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -276,7 +345,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -290,7 +359,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -299,7 +368,6 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
       }
     } else if (op.entityType === 'pet_setting') {
       const payload = op.payload as TablesUpdate<'pet_settings'>;
-      // First attempt updating the existing companion settings row
       const { data: updated, error: updateErr } = await supabase
         .from('pet_settings')
         .update(payload)
@@ -307,7 +375,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
         .select('id');
 
       if (updateErr) {
-        if (isPermanentError(updateErr)) {
+        if (isPermanentError(updateErr, op.retryCount)) {
           return { success: false, permanentError: updateErr.message };
         }
         return { success: false };
@@ -317,14 +385,13 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
         return { success: true };
       }
 
-      // If no row exists yet for this user, atomically upsert targeting user_id
       const upsertPayload = { user_id: op.scope, ...payload } as TablesInsert<'pet_settings'>;
       const { error: upsertErr } = await supabase
         .from('pet_settings')
         .upsert(upsertPayload, { onConflict: 'user_id' });
 
       if (upsertErr) {
-        if (isPermanentError(upsertErr)) {
+        if (isPermanentError(upsertErr, op.retryCount)) {
           return { success: false, permanentError: upsertErr.message };
         }
         return { success: false };
@@ -332,7 +399,6 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
       return { success: true };
     } else if (op.entityType === 'preference') {
       const payload = op.payload as TablesUpdate<'user_preferences'>;
-      // First attempt updating the existing user preference row
       const { data: updated, error: updateErr } = await supabase
         .from('user_preferences')
         .update(payload)
@@ -340,7 +406,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
         .select('id');
 
       if (updateErr) {
-        if (isPermanentError(updateErr)) {
+        if (isPermanentError(updateErr, op.retryCount)) {
           return { success: false, permanentError: updateErr.message };
         }
         return { success: false };
@@ -350,14 +416,13 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
         return { success: true };
       }
 
-      // If no row exists yet for this user, atomically upsert targeting user_id
       const upsertPayload = { user_id: op.scope, ...payload } as TablesInsert<'user_preferences'>;
       const { error: upsertErr } = await supabase
         .from('user_preferences')
         .upsert(upsertPayload, { onConflict: 'user_id' });
 
       if (upsertErr) {
-        if (isPermanentError(upsertErr)) {
+        if (isPermanentError(upsertErr, op.retryCount)) {
           return { success: false, permanentError: upsertErr.message };
         }
         return { success: false };
@@ -371,7 +436,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .upsert(payload, { onConflict: 'id' });
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -386,7 +451,7 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };
@@ -400,7 +465,384 @@ async function executeOperation(op: OutboxOperation): Promise<{ success: boolean
           .eq('user_id', op.scope);
 
         if (error) {
-          if (isPermanentError(error)) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'project') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'projects'>;
+        const { error } = await supabase
+          .from('projects')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'projects'>;
+        const { error } = await supabase
+          .from('projects')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('projects')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'project_board') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'project_boards'>;
+        const { error } = await supabase
+          .from('project_boards')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'project_boards'>;
+        const { error } = await supabase
+          .from('project_boards')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('project_boards')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'board_column') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'board_columns'>;
+        const { error } = await supabase
+          .from('board_columns')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'board_columns'>;
+        const { error } = await supabase
+          .from('board_columns')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('board_columns')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'time_entry') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'time_entries'>;
+        const { error } = await supabase
+          .from('time_entries')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          // Check for cross-device running timer conflict (23505 on idx_unique_running_timer_per_user)
+          const isRunningTimerConflict =
+            error.code === '23505' &&
+            Boolean(
+              error.message?.includes('idx_unique_running_timer_per_user') ||
+                error.message?.includes('running')
+            );
+
+          if (isRunningTimerConflict && payload.state === 'running') {
+            // Another device started a running timer while this device was offline.
+            // Safely recover by inserting in 'paused' state so work is preserved without losing data.
+            const fallbackPayload: TablesInsert<'time_entries'> = {
+              ...payload,
+              state: 'paused',
+            };
+            const { error: fallbackErr } = await supabase
+              .from('time_entries')
+              .upsert(fallbackPayload, { onConflict: 'id' });
+
+            if (!fallbackErr) {
+              return { success: true };
+            }
+          }
+
+          // Check for active interval temporal conflict
+          const isTemporalConflict =
+            Boolean(error.message?.includes('Active work interval conflicts')) ||
+            Boolean(error.message?.includes('active work interval'));
+
+          if (isTemporalConflict) {
+            // Quarantine conflicted record to preserve user's work forensically
+            const quarantinedPayload: TablesInsert<'time_entries'> = {
+              ...payload,
+              state: 'quarantined',
+              is_recovered: true,
+              recovery_reason: 'Resolved cross-device active interval collision during offline sync',
+            };
+            const { error: qErr } = await supabase
+              .from('time_entries')
+              .upsert(quarantinedPayload, { onConflict: 'id' });
+
+            if (!qErr) {
+              return { success: true };
+            }
+          }
+
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'time_entries'>;
+        const { error } = await supabase
+          .from('time_entries')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          // Check for active interval temporal conflict on update
+          const isTemporalConflict =
+            Boolean(error.message?.includes('Active work interval conflicts')) ||
+            Boolean(error.message?.includes('active work interval'));
+
+          if (isTemporalConflict) {
+            const quarantinedPayload: TablesUpdate<'time_entries'> = {
+              ...payload,
+              state: 'quarantined',
+              is_recovered: true,
+              recovery_reason: 'Resolved cross-device active interval collision during offline sync',
+            };
+            const { error: qErr } = await supabase
+              .from('time_entries')
+              .update(quarantinedPayload)
+              .eq('id', op.entityId)
+              .eq('user_id', op.scope);
+
+            if (!qErr) {
+              return { success: true };
+            }
+          }
+
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('time_entries')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'time_entry_pause') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'time_entry_pauses'>;
+        const { error } = await supabase
+          .from('time_entry_pauses')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'time_entry_pauses'>;
+        const { error } = await supabase
+          .from('time_entry_pauses')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('time_entry_pauses')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'time_entry_idle') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'time_entry_idles'>;
+        const { error } = await supabase
+          .from('time_entry_idles')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'time_entry_idles'>;
+        const { error } = await supabase
+          .from('time_entry_idles')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('time_entry_idles')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      }
+    } else if (op.entityType === 'daily_report') {
+      if (op.action === 'create') {
+        const payload = op.payload as TablesInsert<'daily_reports'>;
+        const { error } = await supabase
+          .from('daily_reports')
+          .upsert(payload, { onConflict: 'user_id,report_date' });
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'update') {
+        const payload = op.payload as TablesUpdate<'daily_reports'>;
+        const { error } = await supabase
+          .from('daily_reports')
+          .update(payload)
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
+            return { success: false, permanentError: error.message };
+          }
+          return { success: false };
+        }
+        return { success: true };
+      } else if (op.action === 'delete') {
+        const { error } = await supabase
+          .from('daily_reports')
+          .delete()
+          .eq('id', op.entityId)
+          .eq('user_id', op.scope);
+
+        if (error) {
+          if (isPermanentError(error, op.retryCount)) {
             return { success: false, permanentError: error.message };
           }
           return { success: false };

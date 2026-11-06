@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 20 5"
+   height="5"
+   width="20"
+   id="svg833"
+   version="1.1"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata
+     id="metadata839">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title />
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <defs
+     id="defs837">
+    <linearGradient
+       id="linearGradient853">
+      <stop
+         id="stop849"
+         offset="0"
+         style="stop-color:#d6cfc6;stop-opacity:1" />
+      <stop
+         id="stop851"
+         offset="1"
+         style="stop-color:#8d887a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient
+       gradientUnits="userSpaceOnUse"
+       y2="2.1011236"
+       x2="4.97191"
+       y1="4.0112362"
+       x1="3"
+       id="linearGradient855"
+       xlink:href="#linearGradient853" />
+    <linearGradient
+       gradientTransform="translate(4.0000001)"
+       xlink:href="#linearGradient853"
+       id="linearGradient855-0"
+       x1="3"
+       y1="4.0112362"
+       x2="4.97191"
+       y2="2.1011236"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       gradientTransform="translate(8)"
+       xlink:href="#linearGradient853"
+       id="linearGradient855-5"
+       x1="3"
+       y1="4.0112362"
+       x2="4.97191"
+       y2="2.1011236"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       gradientTransform="translate(12)"
+       xlink:href="#linearGradient853"
+       id="linearGradient855-55"
+       x1="3"
+       y1="4.0112362"
+       x2="4.97191"
+       y2="2.1011236"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <g
+     id="g841">
+    <rect
+       style="fill:url(#linearGradient855-55);fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:round"
+       id="rect845-2"
+       width="2"
+       height="2"
+       x="15"
+       y="2" />
+    <rect
+       y="2"
+       x="3"
+       height="2"
+       width="2"
+       id="rect845"
+       style="fill:url(#linearGradient855);fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:round" />
+    <rect
+       style="fill:url(#linearGradient855-0);fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:round"
+       id="rect845-5"
+       width="2"
+       height="2"
+       x="7"
+       y="2" />
+    <rect
+       style="fill:url(#linearGradient855-5);fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:round"
+       id="rect845-9"
+       width="2"
+       height="2"
+       x="11"
+       y="2" />
+  </g>
+</svg>

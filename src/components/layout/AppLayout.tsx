@@ -64,6 +64,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           petStatus={petStatus}
           currentMood={currentMood}
           onOpenAuthModal={onOpenAuthModal}
+          onNavigate={onNavigate}
         />
 
         <main className="page-container">{children}</main>

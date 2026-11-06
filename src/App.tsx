@@ -4,6 +4,7 @@ import type { PetFocusState } from './lib/pet/autonomousEngine';
 import { initialPetStatus } from './data/mockData';
 import { AppLayout } from './components/layout/AppLayout';
 import { AuthProvider } from './context/AuthContext';
+import { TimerProvider } from './context/TimerContext';
 import { AuthModal } from './components/auth/AuthModal';
 import { useTasks } from './hooks/useTasks';
 import { useReminders } from './hooks/useReminders';
@@ -32,7 +33,16 @@ import { SettingsPage } from './pages/SettingsPage';
 function AppContent() {
   const { user } = useAuth();
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
-  const { theme, toggleTheme } = useUserPreferences();
+  const {
+    preferences,
+    theme,
+    loading: preferencesLoading,
+    saving: preferencesSaving,
+    error: preferencesError,
+    toggleTheme,
+    updatePreferences,
+    retry: retryPreferences,
+  } = useUserPreferences();
   const [currentMood, setCurrentMood] = useState<PetMood>('attentive');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [activeFocusSession, setActiveFocusSession] = useState<PetFocusState | null>(null);
@@ -52,6 +62,7 @@ function AppContent() {
     error: tasksError,
     addTask,
     editTask,
+    moveTask,
     toggleTask,
     deleteTask,
     retry: retryTasks,
@@ -260,6 +271,7 @@ function AppContent() {
             onToggleTask={toggleTask}
             onAddTask={addTask}
             onEditTask={editTask}
+            onMoveTask={moveTask}
             onDeleteTask={deleteTask}
             onRetry={retryTasks}
           />
@@ -329,6 +341,12 @@ function AppContent() {
             profileError={profileError}
             onUpdateFullName={updateFullName}
             onRetryProfile={retryProfile}
+            preferences={preferences}
+            preferencesLoading={preferencesLoading}
+            preferencesSaving={preferencesSaving}
+            preferencesError={preferencesError}
+            onUpdatePreferences={updatePreferences}
+            onRetryPreferences={retryPreferences}
             tasks={tasks}
             reminders={reminders}
             petSettings={petSettings}
@@ -363,7 +381,7 @@ function AppContent() {
   };
 
   return (
-    <>
+    <TimerProvider tasks={tasks}>
       <AppLayout
         currentPage={currentPage}
         onNavigate={setCurrentPage}
@@ -464,7 +482,7 @@ function AppContent() {
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
       />
-    </>
+    </TimerProvider>
   );
 }
 

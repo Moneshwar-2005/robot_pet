@@ -1,5 +1,5 @@
 /**
- * Kuro Synchronization Types — Step 3.5
+ * Kuro Synchronization Types — Step 3.5 & Phase 10 Extension
  *
  * Defines explicit persistence and synchronization states for local-first operations.
  */
@@ -15,7 +15,18 @@ export type OutboxEntityType =
   | 'session'
   | 'pet_setting'
   | 'preference'
-  | 'routine';
+  | 'routine'
+  | 'project'
+  | 'project_board'
+  | 'board_column'
+  | 'task_label'
+  | 'task_label_assignment'
+  | 'time_entry'
+  | 'time_entry_pause'
+  | 'time_entry_idle'
+  | 'computer_activity_event'
+  | 'pet_reaction_log'
+  | 'daily_report';
 
 export type OutboxStatus = 'pending' | 'processing' | 'failed';
 
@@ -31,6 +42,7 @@ export interface OutboxOperation<T = unknown> {
   status: OutboxStatus;
   retryCount: number;
   lastError?: string | null;
+  sequenceNumber?: number; // Monotonic sequence for deterministic dependency ordering
 }
 
 export interface SyncState {

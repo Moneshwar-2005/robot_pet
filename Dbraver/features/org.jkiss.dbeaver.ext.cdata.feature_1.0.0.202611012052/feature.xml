@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+    id="org.jkiss.dbeaver.ext.cdata.feature"
+    label="DBeaver CData Support"
+    version="1.0.0.202611012052"
+    provider-name="DBeaver Corp">
+
+    <copyright>DBeaver Corp and others</copyright>
+
+    <plugin id="org.jkiss.dbeaver.ext.cdata" version="1.0.12.202611012052"/>
+    <plugin id="org.jkiss.dbeaver.ext.cdata.ui" version="1.0.12.202611012052"/>
+
+</feature>

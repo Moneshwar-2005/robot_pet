@@ -93,6 +93,14 @@ const report = {
 // ---------------------------------------------------------------------------
 console.log('\n--- SECTION 1: Complete 7-Entity Offline Synchronization ---');
 
+// Resolve workspace containers for Phase 9 hierarchy compliance
+const { data: userProjs } = await supabase.from('projects').select('id').eq('user_id', userId).limit(1);
+const { data: userBoards } = await supabase.from('project_boards').select('id').eq('user_id', userId).limit(1);
+const { data: userCols } = await supabase.from('board_columns').select('id').eq('user_id', userId).eq('status_category', 'todo').limit(1);
+const defaultProjId = userProjs?.[0]?.id || null;
+const defaultBoardId = userBoards?.[0]?.id || null;
+const defaultColId = userCols?.[0]?.id || null;
+
 const sevenEntities = [
   {
     type: 'task',
@@ -104,6 +112,9 @@ const sevenEntities = [
       priority: 'high',
       completed: false,
       estimated_minutes: 30,
+      project_id: defaultProjId,
+      board_id: defaultBoardId,
+      column_id: defaultColId,
     },
     updatePayload: { completed: true, title: `${testTag} Sync Task (Updated)` },
     table: 'tasks',
@@ -712,6 +723,9 @@ const { data: xssTask, error: xssErr } = await supabase.from('tasks').insert({
   title: xssTaskTitle,
   category: 'work',
   priority: 'low',
+  project_id: defaultProjId,
+  board_id: defaultBoardId,
+  column_id: defaultColId,
 }).select().single();
 assert.ok(!xssErr && xssTask);
 await supabase.from('tasks').delete().eq('id', xssTask.id);

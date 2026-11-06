@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { WorkSummary, Task } from '../types';
 import type { ClientWorkSession } from '../lib/adapters';
 import { formatSessionDuration, formatTimeDisplay } from '../lib/formatters';
-import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
+import { formatTimerDuration } from '../lib/timerCalculations';
+import { useTimer } from '../context/useTimer';
 import {
   Play,
   Pause,
-  RotateCcw,
   Activity,
   CheckCircle2,
   AlertCircle,
@@ -14,6 +14,9 @@ import {
   Loader2,
   Trash2,
   Clock,
+  Square,
+  CheckSquare,
+  Folder,
 } from 'lucide-react';
 
 interface WorkTrackingPageProps {
@@ -46,143 +49,65 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
   sessions,
   loading = false,
   error = null,
-  onRecordSession,
+  onRecordSession: _onRecordSession,
   onDeleteSession,
   onRetry,
+  tasks = [],
   onFocusStateChange,
 }) => {
+  const {
+    activeEntry,
+    activeTask,
+    activeProject,
+    timerStatus,
+    elapsedSeconds,
+    startTimer,
+    pauseTimer,
+    resumeTimer,
+    stopTimer,
+    isStale,
+    error: timerError,
+    clearError: clearTimerError,
+  } = useTimer();
+
   const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
-  const [secondsLeft, setSecondsLeft] = useState(25 * 60);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('Deep Work Sprint');
+  const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [sessionToDelete, setSessionToDelete] = useState<ClientWorkSession | null>(null);
-  const sessionStartTimeRef = useRef<string | null>(null);
-  const isRecordingRef = useRef(false);
-  const sessionTitleRef = useRef(sessionTitle);
 
-  useEffect(() => {
-    sessionTitleRef.current = sessionTitle;
-  }, [sessionTitle]);
-
+  // Sync focus state to parent companion/pet listeners
   useEffect(() => {
     if (onFocusStateChange) {
-      if (isRunning) {
+      if (timerStatus === 'running' || timerStatus === 'paused') {
         onFocusStateChange({
-          isActive: true,
+          isActive: timerStatus === 'running',
           mode: timerMode === 'focus' ? 'focus' : 'short_break',
-          remainingSeconds: secondsLeft,
+          remainingSeconds: Math.max(0, 25 * 60 - elapsedSeconds),
         });
       } else {
         onFocusStateChange(null);
       }
     }
-  }, [isRunning, timerMode, secondsLeft, onFocusStateChange]);
+  }, [timerStatus, timerMode, elapsedSeconds, onFocusStateChange]);
 
-  useEffect(() => {
-    if (!isRunning) return;
+  const handleStartTimer = async () => {
+    const chosenTaskId = selectedTaskId || null;
+    const taskObj = tasks.find((t) => t.id === chosenTaskId);
+    const chosenProjectId = taskObj?.projectId || null;
 
-    const interval = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          setIsRunning(false);
-          if (!isRecordingRef.current) {
-            isRecordingRef.current = true;
-            setIsRecording(true);
-            const startedAt =
-              sessionStartTimeRef.current ||
-              new Date(Date.now() - (timerMode === 'focus' ? 25 : 5) * 60000).toISOString();
-            sessionStartTimeRef.current = null;
-            const durationMinutes = timerMode === 'focus' ? 25 : 5;
-            const titleToRecord =
-              sessionTitleRef.current.trim() ||
-              (timerMode === 'focus' ? 'Deep Work Sprint' : 'Rest Break');
-
-            void onRecordSession({
-              title: titleToRecord,
-              sessionType: timerMode,
-              durationMinutes,
-              startedAt,
-              completedAt: new Date().toISOString(),
-            }).finally(() => {
-              isRecordingRef.current = false;
-              setIsRecording(false);
-            });
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isRunning, timerMode, onRecordSession]);
-
-  const toggleRun = () => {
-    if (isRecording) return;
-    if (!isRunning) {
-      if (!sessionStartTimeRef.current) {
-        sessionStartTimeRef.current = new Date().toISOString();
-      }
-      setIsRunning(true);
-    } else {
-      setIsRunning(false);
-    }
-  };
-
-  const resetTimer = (mode: 'focus' | 'break') => {
-    if (isRecording) return;
-    setIsRunning(false);
-    sessionStartTimeRef.current = null;
-    setTimerMode(mode);
-    setSecondsLeft(mode === 'focus' ? 25 * 60 : 5 * 60);
-    setSessionTitle(mode === 'focus' ? 'Deep Work Sprint' : 'Rest Break');
-  };
-
-  const handleCompleteEarly = async () => {
-    if (isRecordingRef.current || isRecording) return;
-    const totalSecs = timerMode === 'focus' ? 25 * 60 : 5 * 60;
-    const elapsedSecs = totalSecs - secondsLeft;
-    const elapsedMins = Math.max(1, Math.round(elapsedSecs / 60));
-    const startedAt = sessionStartTimeRef.current || new Date().toISOString();
-
-    isRecordingRef.current = true;
-    setIsRecording(true);
-    setIsRunning(false);
-    sessionStartTimeRef.current = null;
-
-    try {
-      await onRecordSession({
-        title: sessionTitle.trim() || (timerMode === 'focus' ? 'Deep Work Sprint' : 'Rest Break'),
-        sessionType: timerMode,
-        durationMinutes: elapsedMins,
-        startedAt,
-        completedAt: new Date().toISOString(),
-      });
-    } finally {
-      isRecordingRef.current = false;
-      setIsRecording(false);
-      setSecondsLeft(timerMode === 'focus' ? 25 * 60 : 5 * 60);
-    }
-  };
-
-  const formatTimerDigits = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    await startTimer({
+      taskId: chosenTaskId,
+      projectId: chosenProjectId,
+      trackingSource: 'manual',
+    });
   };
 
   const completedBlocksCount = sessions.filter((s) => s.sessionType === 'focus' && s.completedAt).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <PlannedFeatureNotice
-        phase="Phase 2: Persistent Work Sessions"
-        title="Focus Session &amp; Telemetry Tracker"
-        description="Run focus blocks and track daily session milestones. Authenticated session logs are persisted to Supabase; local demo mode is active when signed out."
-      />
-
-      {error && (
+      {/* Error Banners */}
+      {(error || timerError) && (
         <div
           style={{
             display: 'flex',
@@ -198,113 +123,281 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertCircle size={18} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
-            <span style={{ fontSize: '13px' }}>{error}</span>
+            <span style={{ fontSize: '13px' }}>{timerError || error}</span>
           </div>
-          {onRetry && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={onRetry}
-              style={{ padding: '4px 10px', fontSize: '12px' }}
-            >
-              <RefreshCw size={12} />
-              <span>Retry</span>
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {timerError && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={clearTimerError}
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+              >
+                Dismiss
+              </button>
+            )}
+            {onRetry && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onRetry}
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+              >
+                <RefreshCw size={12} />
+                <span>Retry</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Stale Timer Notice if active timer > 12 hours */}
+      {isStale && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            padding: '12px 16px',
+            backgroundColor: 'rgba(234, 179, 8, 0.12)',
+            border: '1px solid var(--status-yellow)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Clock size={18} style={{ color: 'var(--status-yellow)', flexShrink: 0 }} />
+            <span style={{ fontSize: '13px' }}>
+              This timer has been running or paused for over 12 hours without activity. Please finalize or stop your session.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void stopTimer()}
+            style={{ padding: '4px 12px', fontSize: '12px' }}
+          >
+            Finalize Now
+          </button>
         </div>
       )}
 
       <div className="dashboard-grid">
-        {/* Left Column: Big Interactive Timer */}
+        {/* Left Column: Big Interactive Normalized Timer */}
         <div className="col-6">
           <div className="card" style={{ textAlign: 'center', padding: '32px 20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '20px' }}>
-              <button
-                type="button"
-                className={`expression-btn ${timerMode === 'focus' ? 'active' : ''}`}
-                onClick={() => resetTimer('focus')}
-              >
-                Deep Focus (25m)
-              </button>
-              <button
-                type="button"
-                className={`expression-btn ${timerMode === 'break' ? 'active' : ''}`}
-                onClick={() => resetTimer('break')}
-              >
-                Short Break (5m)
-              </button>
+            {/* Timer Status & Mode Header */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+              {timerStatus === 'running' ? (
+                <span
+                  className="badge"
+                  style={{
+                    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                    color: 'var(--status-green)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    padding: '4px 12px',
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  ● RUNNING
+                </span>
+              ) : timerStatus === 'paused' ? (
+                <span
+                  className="badge"
+                  style={{
+                    backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                    color: 'var(--status-yellow)',
+                    border: '1px solid rgba(234, 179, 8, 0.4)',
+                    padding: '4px 12px',
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  ❚❚ PAUSED
+                </span>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className={`expression-btn ${timerMode === 'focus' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTimerMode('focus');
+                      setSessionTitle('Deep Work Sprint');
+                    }}
+                  >
+                    Deep Focus
+                  </button>
+                  <button
+                    type="button"
+                    className={`expression-btn ${timerMode === 'break' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTimerMode('break');
+                      setSessionTitle('Rest Break');
+                    }}
+                  >
+                    Short Break
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div style={{ maxWidth: '320px', margin: '0 auto 16px auto' }}>
-              <input
-                type="text"
-                value={sessionTitle}
-                onChange={(e) => setSessionTitle(e.target.value)}
-                placeholder="Session focus objective..."
-                style={{
-                  width: '100%',
-                  textAlign: 'center',
-                  padding: '6px 12px',
-                  background: 'var(--bg-input)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--text-primary)',
-                  fontSize: '13px',
-                }}
-              />
+            {/* Active Task or Target Selector */}
+            <div style={{ maxWidth: '340px', margin: '0 auto 16px auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {activeEntry ? (
+                <div
+                  style={{
+                    padding: '8px 14px',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600 }}>
+                    <CheckSquare size={14} style={{ color: 'var(--accent-primary)' }} />
+                    <span>{activeTask?.title || sessionTitle || 'General Focus Session'}</span>
+                  </div>
+                  {activeProject && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      <Folder size={11} />
+                      <span>{activeProject.name}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={selectedTaskId}
+                    onChange={(e) => setSelectedTaskId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '7px 12px',
+                      background: 'var(--bg-input)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                    }}
+                  >
+                    <option value="">(No linked task — General Sprint)</option>
+                    {tasks
+                      .filter((t) => !t.completed)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={sessionTitle}
+                    onChange={(e) => setSessionTitle(e.target.value)}
+                    placeholder="Session focus objective..."
+                    style={{
+                      width: '100%',
+                      textAlign: 'center',
+                      padding: '6px 12px',
+                      background: 'var(--bg-input)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                    }}
+                  />
+                </>
+              )}
             </div>
 
+            {/* Big Monospace Duration Display */}
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '64px',
                 fontWeight: 700,
-                color: isRunning ? 'var(--accent-primary)' : 'var(--text-primary)',
+                color:
+                  timerStatus === 'running'
+                    ? 'var(--accent-primary)'
+                    : timerStatus === 'paused'
+                    ? 'var(--status-yellow)'
+                    : 'var(--text-primary)',
                 letterSpacing: '-0.03em',
                 marginBottom: '16px',
               }}
             >
-              {formatTimerDigits(secondsLeft)}
+              {formatTimerDuration(elapsedSeconds)}
             </div>
 
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px' }}>
-              {isRunning
-                ? `Active ${timerMode === 'focus' ? 'Deep Work' : 'Rest'} Session — Kuro is guarding your focus.`
-                : 'Press Start when you are ready to begin your sprint.'}
+              {timerStatus === 'running'
+                ? 'Active focus session recorded to normalized database. Kuro is guarding your flow.'
+                : timerStatus === 'paused'
+                ? 'Session paused. Pause duration is strictly excluded from active work.'
+                : 'Select an existing task or start a general sprint when you are ready.'}
             </p>
 
+            {/* Primary Controls */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ padding: '10px 24px', fontSize: '14px' }}
-                onClick={toggleRun}
-              >
-                {isRunning ? <Pause size={16} /> : <Play size={16} />}
-                <span>{isRunning ? 'Pause' : 'Start Timer'}</span>
-              </button>
+              {timerStatus === 'running' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ padding: '10px 22px', fontSize: '14px' }}
+                    onClick={() => void pauseTimer()}
+                  >
+                    <Pause size={16} />
+                    <span>Pause</span>
+                  </button>
 
-              {isRunning && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ padding: '10px 22px', fontSize: '14px' }}
+                    onClick={() => void stopTimer()}
+                  >
+                    <Square size={16} />
+                    <span>Stop &amp; Log</span>
+                  </button>
+                </>
+              ) : timerStatus === 'paused' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ padding: '10px 22px', fontSize: '14px' }}
+                    onClick={() => void resumeTimer()}
+                  >
+                    <Play size={16} />
+                    <span>Resume</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ padding: '10px 22px', fontSize: '14px' }}
+                    onClick={() => void stopTimer()}
+                  >
+                    <Square size={16} />
+                    <span>Stop &amp; Log</span>
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '10px 16px', fontSize: '14px' }}
-                  onClick={handleCompleteEarly}
+                  className="btn btn-primary"
+                  style={{ padding: '10px 28px', fontSize: '14px' }}
+                  onClick={() => void handleStartTimer()}
                 >
-                  <CheckCircle2 size={16} style={{ color: 'var(--status-green)' }} />
-                  <span>Log Sprint</span>
+                  <Play size={16} />
+                  <span>Start Timer</span>
                 </button>
               )}
-
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '10px 16px', fontSize: '14px' }}
-                onClick={() => resetTimer(timerMode)}
-              >
-                <RotateCcw size={16} />
-                <span>Reset</span>
-              </button>
             </div>
           </div>
         </div>
@@ -394,7 +487,37 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
                           }}
                         />
                         <div>
-                          <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{sess.title}</div>
+                          <div style={{ fontWeight: 500, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{sess.title}</span>
+                            {sess.isNormalized ? (
+                              <span
+                                className="badge"
+                                style={{
+                                  fontSize: '9.5px',
+                                  padding: '1px 5px',
+                                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                  color: 'var(--accent-primary)',
+                                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                                }}
+                                title="Phase 9 normalized time entry"
+                              >
+                                Normalized
+                              </span>
+                            ) : (
+                              <span
+                                className="badge"
+                                style={{
+                                  fontSize: '9.5px',
+                                  padding: '1px 5px',
+                                  backgroundColor: 'var(--bg-card-hover)',
+                                  color: 'var(--text-muted)',
+                                }}
+                                title="Historical work session"
+                              >
+                                Legacy
+                              </span>
+                            )}
+                          </div>
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
                             {sess.sessionType} sprint
                           </span>
@@ -457,28 +580,12 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                marginBottom: '12px',
-                color: 'var(--status-red)',
-              }}
-            >
-              <AlertCircle size={20} />
-              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Delete Work Session?</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--status-red)', marginBottom: '12px' }}>
+              <AlertCircle size={22} />
+              <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>Delete Session Record</h3>
             </div>
-            <p
-              style={{
-                fontSize: '13px',
-                color: 'var(--text-secondary)',
-                marginBottom: '16px',
-                lineHeight: 1.5,
-              }}
-            >
-              Are you sure you want to delete session log{' '}
-              <strong style={{ color: 'var(--text-primary)' }}>"{sessionToDelete.title}"</strong> ({sessionToDelete.durationMinutes} mins)? This action cannot be undone.
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '20px' }}>
+              Are you sure you want to delete the session record for &quot;{sessionToDelete.title}&quot;?
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button
@@ -490,14 +597,15 @@ export const WorkTrackingPage: React.FC<WorkTrackingPageProps> = ({
               </button>
               <button
                 type="button"
-                className="btn"
-                style={{ backgroundColor: 'var(--status-red)', color: '#fff' }}
+                className="btn btn-danger"
                 onClick={() => {
-                  if (onDeleteSession) onDeleteSession(sessionToDelete.id);
+                  if (onDeleteSession) {
+                    void onDeleteSession(sessionToDelete.id);
+                  }
                   setSessionToDelete(null);
                 }}
               >
-                Delete Session
+                Delete
               </button>
             </div>
           </div>

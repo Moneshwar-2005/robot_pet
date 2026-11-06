@@ -422,6 +422,12 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n--- Workflow 4: Tasks (tasks table) ---');
   const taskTitle = `${testBatchTag} Initial Task`;
+
+  // Resolve workspace containers for Phase 9 hierarchy trigger compliance
+  const { data: userProjs } = await supabase.from('projects').select('id').eq('user_id', userId).limit(1);
+  const { data: userBoards } = await supabase.from('project_boards').select('id').eq('user_id', userId).limit(1);
+  const { data: userCols } = await supabase.from('board_columns').select('id').eq('user_id', userId).eq('status_category', 'todo').limit(1);
+
   const { data: insTask, error: insTaskErr } = await supabase.from('tasks').insert({
     user_id: userId,
     title: taskTitle,
@@ -429,6 +435,9 @@ try {
     priority: 'high',
     completed: false,
     estimated_minutes: 45,
+    project_id: userProjs?.[0]?.id || null,
+    board_id: userBoards?.[0]?.id || null,
+    column_id: userCols?.[0]?.id || null,
   }).select().single();
   assert.ok(!insTaskErr && insTask, `Task insert failed: ${insTaskErr?.message}`);
 
@@ -597,6 +606,9 @@ try {
     priority: 'high',
     completed: false,
     estimated_minutes: 25,
+    project_id: userProjs?.[0]?.id || null,
+    board_id: userBoards?.[0]?.id || null,
+    column_id: userCols?.[0]?.id || null,
   };
 
   const offlineRemId = crypto.randomUUID();

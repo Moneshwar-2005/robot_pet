@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import type { Theme, Task, Reminder } from '../types';
+import type { Theme, Task, Reminder, UserPreferences } from '../types';
+import { DEFAULT_USER_PREFERENCES } from '../types';
 import type { UserProfile, ClientWorkSession, ClientPetSettings } from '../lib/adapters';
 import { PlannedFeatureNotice } from '../components/common/PlannedFeatureNotice';
 import {
@@ -21,6 +22,8 @@ import {
   WifiOff,
   HardDrive,
   Smartphone,
+  EyeOff,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { supabaseEnvErrors } from '../lib/supabase';
@@ -29,7 +32,6 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 import { useSyncStatus } from '../hooks/useSyncStatus';
 import { MobileAICompatibilityCard } from '../components/settings/MobileAICompatibilityCard';
 import { DesktopCompanionCard } from '../components/settings/DesktopCompanionCard';
-
 
 interface SettingsPageProps {
   theme: Theme;
@@ -42,11 +44,66 @@ interface SettingsPageProps {
   profileError?: string | null;
   onUpdateFullName?: (newFullName: string) => Promise<boolean>;
   onRetryProfile?: () => void;
+  preferences?: UserPreferences;
+  preferencesLoading?: boolean;
+  preferencesSaving?: boolean;
+  preferencesError?: string | null;
+  onUpdatePreferences?: (updates: Partial<UserPreferences>) => Promise<boolean>;
+  onRetryPreferences?: () => void;
   tasks?: Task[];
   reminders?: Reminder[];
   petSettings?: ClientPetSettings;
   sessions?: ClientWorkSession[];
 }
+
+const ToggleSwitch: React.FC<{
+  id: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  label: string;
+}> = ({ id, checked, onChange, disabled = false, label }) => (
+  <button
+    id={id}
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    disabled={disabled}
+    onClick={() => !disabled && onChange(!checked)}
+    style={{
+      position: 'relative',
+      width: '44px',
+      height: '24px',
+      borderRadius: '12px',
+      backgroundColor: disabled
+        ? 'var(--bg-card-subtle)'
+        : checked
+          ? 'var(--accent-primary)'
+          : 'var(--bg-input)',
+      border: `1px solid ${checked && !disabled ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      opacity: disabled ? 0.45 : 1,
+      transition: 'all 0.2s ease',
+      padding: 0,
+      flexShrink: 0,
+    }}
+  >
+    <span
+      style={{
+        position: 'absolute',
+        top: '2px',
+        left: checked ? '22px' : '2px',
+        width: '18px',
+        height: '18px',
+        borderRadius: '50%',
+        backgroundColor: checked && !disabled ? '#03070d' : 'var(--text-secondary)',
+        transition: 'left 0.2s ease, background-color 0.2s ease',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+      }}
+    />
+  </button>
+);
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   theme,
@@ -59,6 +116,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   profileError = null,
   onUpdateFullName,
   onRetryProfile,
+  preferences = DEFAULT_USER_PREFERENCES,
+  preferencesLoading = false,
+  preferencesSaving = false,
+  preferencesError = null,
+  onUpdatePreferences,
+  onRetryPreferences,
   tasks = [],
   reminders = [],
   petSettings,
@@ -70,6 +133,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const { isSyncing, pendingCount, lastSyncedAt, lastError, triggerSync } = useSyncStatus();
   const [fullNameInput, setFullNameInput] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [prefSaveSuccess, setPrefSaveSuccess] = useState(false);
 
   const displayedFullName = fullNameInput ?? (profile?.fullName || '');
   const isSaveDisabled =
@@ -82,6 +146,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       setFullNameInput(null);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
+    }
+  };
+
+  const handleUpdatePreference = async (updates: Partial<UserPreferences>) => {
+    if (!onUpdatePreferences) return;
+    const ok = await onUpdatePreferences(updates);
+    if (ok) {
+      setPrefSaveSuccess(true);
+      setTimeout(() => setPrefSaveSuccess(false), 2500);
     }
   };
 
@@ -190,6 +263,159 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   </p>
                 </div>
                 <span className="badge badge-active">Active</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Automation & Daily Report Preferences (Phase 9 Milestone 2) */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title-group">
+                <Sparkles className="card-icon" style={{ color: 'var(--status-amber)' }} />
+                <h3 className="card-title">Automation &amp; Daily Report Preferences</h3>
+              </div>
+              <span className={`badge ${preferences.autoReportsEnabled ? 'badge-active' : 'badge-neutral'}`}>
+                {preferences.autoReportsEnabled ? 'Auto-Reports Enabled' : 'Manual Only'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Feedback banners */}
+              {preferencesError && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid var(--status-red)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '12px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertCircle size={14} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+                    <span>{preferencesError}</span>
+                  </div>
+                  {onRetryPreferences && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={onRetryPreferences}
+                      style={{ padding: '2px 8px', fontSize: '11px' }}
+                    >
+                      <RefreshCw size={10} /> Retry
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {preferencesLoading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>Loading user preferences from database...</span>
+                </div>
+              )}
+
+              {preferencesSaving && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--accent-primary)' }}>
+                  <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>Saving preference changes...</span>
+                </div>
+              )}
+
+              {prefSaveSuccess && !preferencesSaving && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--status-green)' }}>
+                  <Check size={12} />
+                  <span>Preferences saved and synchronized.</span>
+                </div>
+              )}
+
+              {/* 1. auto_reports_enabled */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Automated Daily Reports</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Synthesizes completed tasks and work sessions into an end-of-day summary.
+                  </p>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Privacy Default: Disabled. Requires explicit opt-in.
+                  </span>
+                </div>
+                <ToggleSwitch
+                  id="pref-auto-reports"
+                  label="Automated Daily Reports"
+                  checked={preferences.autoReportsEnabled}
+                  disabled={preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ autoReportsEnabled: checked })}
+                />
+              </div>
+
+              {/* 2. daily_report_time */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Daily Report Generation Time</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Scheduled time to generate and deliver daily work summaries.
+                  </p>
+                </div>
+                <input
+                  type="time"
+                  id="pref-daily-report-time"
+                  aria-label="Daily Report Scheduled Time"
+                  value={preferences.dailyReportTime}
+                  disabled={preferencesSaving}
+                  onChange={(e) => handleUpdatePreference({ dailyReportTime: e.target.value })}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-primary)',
+                    fontSize: '12.5px',
+                    cursor: preferencesSaving ? 'not-allowed' : 'pointer',
+                  }}
+                />
+              </div>
+
+              {/* 3. auto_break_reminders */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Focus Break &amp; Rest Reminders</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Prompts gentle stretch, posture, and hydration chimes during extended focus sessions.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  id="pref-break-reminders"
+                  label="Focus Break & Rest Reminders"
+                  checked={preferences.autoBreakReminders}
+                  disabled={preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ autoBreakReminders: checked })}
+                />
+              </div>
+
+              {/* 4. music_reaction_enabled */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Media &amp; Music Reactive Moods</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Allows Kuro to react procedurally to desktop media and music playback events.
+                  </p>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Privacy Default: Disabled. Requires explicit opt-in.
+                  </span>
+                </div>
+                <ToggleSwitch
+                  id="pref-music-reactions"
+                  label="Media & Music Reactive Moods"
+                  checked={preferences.musicReactionEnabled}
+                  disabled={preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ musicReactionEnabled: checked })}
+                />
               </div>
             </div>
           </div>
@@ -536,6 +762,190 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+
+          {/* Activity Tracking & Privacy Controls (Phase 9 Milestone 2) */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title-group">
+                <Shield className="card-icon" style={{ color: 'var(--accent-primary)' }} />
+                <h3 className="card-title">Activity Tracking &amp; Privacy Controls</h3>
+              </div>
+              <span className={`badge ${preferences.activityTrackingEnabled ? 'badge-active' : 'badge-neutral'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                {preferences.activityTrackingEnabled ? (
+                  <>
+                    <Check size={11} /> Tracking Active
+                  </>
+                ) : (
+                  <>
+                    <EyeOff size={11} /> Disabled (Default)
+                  </>
+                )}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Feedback banners */}
+              {preferencesError && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid var(--status-red)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '12px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertCircle size={14} style={{ color: 'var(--status-red)', flexShrink: 0 }} />
+                    <span>{preferencesError}</span>
+                  </div>
+                  {onRetryPreferences && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={onRetryPreferences}
+                      style={{ padding: '2px 8px', fontSize: '11px' }}
+                    >
+                      <RefreshCw size={10} /> Retry
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* 1. activity_tracking_enabled (Master Switch) */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Computer Activity Tracking</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Opt-in telemetry for developer environment focus tracking. Zero data is recorded when disabled.
+                  </p>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Privacy Default: Disabled. Never enabled automatically.
+                  </span>
+                </div>
+                <ToggleSwitch
+                  id="pref-activity-tracking"
+                  label="Computer Activity Tracking"
+                  checked={preferences.activityTrackingEnabled}
+                  disabled={preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ activityTrackingEnabled: checked })}
+                />
+              </div>
+
+              {/* 2. tracking_include_window_titles */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: preferences.activityTrackingEnabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    Capture Active Window Titles
+                  </strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Includes foreground window titles in local logs for IDE workspace contextualization.
+                  </p>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    {preferences.activityTrackingEnabled ? 'Privacy Default: Disabled.' : 'Requires Computer Activity Tracking enabled.'}
+                  </span>
+                </div>
+                <ToggleSwitch
+                  id="pref-window-titles"
+                  label="Capture Active Window Titles"
+                  checked={preferences.trackingIncludeWindowTitles}
+                  disabled={!preferences.activityTrackingEnabled || preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ trackingIncludeWindowTitles: checked })}
+                />
+              </div>
+
+              {/* 3. tracking_include_process_names */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: preferences.activityTrackingEnabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    Capture Running Process Names
+                  </strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Records executable names (e.g. code.exe, windsurf.exe) for tool detection.
+                  </p>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    {preferences.activityTrackingEnabled ? 'Privacy Default: Disabled.' : 'Requires Computer Activity Tracking enabled.'}
+                  </span>
+                </div>
+                <ToggleSwitch
+                  id="pref-process-names"
+                  label="Capture Running Process Names"
+                  checked={preferences.trackingIncludeProcessNames}
+                  disabled={!preferences.activityTrackingEnabled || preferencesSaving}
+                  onChange={(checked) => handleUpdatePreference({ trackingIncludeProcessNames: checked })}
+                />
+              </div>
+
+              {/* 4. idle_threshold_seconds */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Idle Detection Threshold</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Inactivity duration before Kuro marks a session as idle.
+                  </p>
+                </div>
+                <select
+                  id="pref-idle-threshold"
+                  aria-label="Idle Detection Threshold"
+                  value={preferences.idleThresholdSeconds}
+                  disabled={preferencesSaving}
+                  onChange={(e) => handleUpdatePreference({ idleThresholdSeconds: Number(e.target.value) })}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-primary)',
+                    fontSize: '12.5px',
+                    cursor: preferencesSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <option value={60}>60s (1 min)</option>
+                  <option value={180}>180s (3 mins)</option>
+                  <option value={300}>300s (5 mins - Default)</option>
+                  <option value={600}>600s (10 mins)</option>
+                  <option value={900}>900s (15 mins)</option>
+                </select>
+              </div>
+
+              {/* 5. telemetry_retention_days */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ paddingRight: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>Telemetry Retention Window</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Period before historical computer activity records are automatically purged.
+                  </p>
+                </div>
+                <select
+                  id="pref-telemetry-retention"
+                  aria-label="Telemetry Retention Window"
+                  value={preferences.telemetryRetentionDays}
+                  disabled={preferencesSaving}
+                  onChange={(e) => handleUpdatePreference({ telemetryRetentionDays: Number(e.target.value) })}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-primary)',
+                    fontSize: '12.5px',
+                    cursor: preferencesSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <option value={7}>7 days (Minimal)</option>
+                  <option value={14}>14 days (2 weeks)</option>
+                  <option value={30}>30 days (Standard Default)</option>
+                  <option value={60}>60 days (2 months)</option>
+                  <option value={90}>90 days (Quarterly)</option>
+                </select>
               </div>
             </div>
           </div>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+      id="org.jkiss.dbeaver.db.feature"
+      label="DBeaver Databases"
+      version="1.0.181.202611012052"
+      provider-name="DBeaver Corp">
+
+   <copyright>DBeaver Corp and others</copyright>
+
+   <plugin id="org.jkiss.dbeaver.ext.db2" version="2.1.275.202611012052"/>
+   <plugin id="org.jkiss.dbeaver.ext.mysql" version="2.1.275.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.mssql" version="1.0.284.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.oracle" version="2.1.275.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.postgresql" version="2.1.263.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.generic" version="2.3.276.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.athena" version="1.0.196.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.bigquery" version="1.0.196.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.clickhouse" version="1.0.195.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.cubrid" version="1.0.66.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.db2.zos" version="1.0.193.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.db2.i" version="1.0.178.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.databend" version="1.0.45.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.tidblake" version="1.0.0.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.derby" version="1.1.275.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.dameng" version="1.0.74.202611012052"  />
+   <plugin id="org.jkiss.dbeaver.ext.mimer" version="1.0.0.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.duckdb" version="1.0.82.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.exasol" version="1.0.248.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.firebird" version="1.0.291.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.gbase8s" version="1.0.39.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.greenplum" version="1.0.191.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.h2" version="1.0.245.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.hana" version="1.2.168.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.hive" version="1.0.196.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.hsqldb" version="1.0.237.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.informix" version="1.0.281.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.iotdb" version="1.0.28.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.netezza" version="1.0.255.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.oceanbase" version="1.0.128.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.tidb" version="1.0.70.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.phoenix" version="1.0.259.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.snowflake" version="1.0.210.202611012052"/>
+   <plugin id="org.jkiss.dbeaver.ext.spanner" version="1.0.177.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.sqlite" version="1.0.239.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.teradata" version="1.0.258.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.timeplus" version="1.0.0.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.trino" version="1.0.83.202611012052"  />
+   <plugin id="org.jkiss.dbeaver.ext.vertica" version="2.0.220.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.ocient" version="1.0.161.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.denodo" version="1.0.136.202611012052"  />
+   <plugin id="org.jkiss.dbeaver.ext.databricks" version="1.0.112.202611012052"  />
+   <plugin id="org.jkiss.dbeaver.ext.altibase" version="1.0.51.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.gaussdb" version="1.0.51.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.kingbase" version="1.0.35.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.manticore" version="1.0.0.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.doris" version="1.0.9.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.starrocks" version="1.0.11.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.greptime" version="1.0.0.202611012052" />
+   <plugin id="org.jkiss.dbeaver.ext.yashandb" version="1.0.0.202611012052" />
+
+   <plugin id="com.dbeaver.jdbc.api" version="2.9.0.202611012052"/>
+
+</feature>

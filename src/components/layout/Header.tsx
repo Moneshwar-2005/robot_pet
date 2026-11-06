@@ -1,10 +1,12 @@
 import React from 'react';
 import type { PageId, Theme, PetStatus, PetMood } from '../../types';
-import { Menu, Moon, Sun, Bot, LogIn, LogOut, User as UserIcon, Wifi, WifiOff, Download, RefreshCw } from 'lucide-react';
+import { Menu, Moon, Sun, Bot, LogIn, LogOut, User as UserIcon, Wifi, WifiOff, Download, RefreshCw, Timer as TimerIcon } from 'lucide-react';
 import { useAuth } from '../../context/useAuth';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { useSyncStatus } from '../../hooks/useSyncStatus';
+import { useTimer } from '../../context/useTimer';
+import { formatTimerDuration } from '../../lib/timerCalculations';
 
 interface HeaderProps {
   currentPage: PageId;
@@ -16,6 +18,7 @@ interface HeaderProps {
   petStatus: PetStatus;
   currentMood: PetMood;
   onOpenAuthModal?: () => void;
+  onNavigate?: (page: PageId) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,11 +30,13 @@ export const Header: React.FC<HeaderProps> = ({
   petStatus,
   currentMood,
   onOpenAuthModal,
+  onNavigate,
 }) => {
   const { user, signOut } = useAuth();
   const { isOnline, wasOffline } = useNetworkStatus();
   const { isInstallable, promptInstall } = usePWAInstall();
   const { isSyncing, pendingCount } = useSyncStatus();
+  const { timerStatus, elapsedSeconds, activeTask } = useTimer();
 
   return (
     <header className="app-header">
@@ -132,6 +137,63 @@ export const Header: React.FC<HeaderProps> = ({
             <Download size={13} />
             <span>Install App</span>
           </button>
+        )}
+
+        {/* Active Normalized Timer Status Pill */}
+        {(timerStatus === 'running' || timerStatus === 'paused') && (
+          <div
+            className="header-status-pill"
+            style={{
+              backgroundColor:
+                timerStatus === 'running' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(234, 179, 8, 0.12)',
+              borderColor:
+                timerStatus === 'running' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(234, 179, 8, 0.4)',
+              color: timerStatus === 'running' ? 'var(--status-green)' : 'var(--status-yellow)',
+              gap: '6px',
+              cursor: onNavigate ? 'pointer' : 'default',
+              userSelect: 'none',
+            }}
+            onClick={() => onNavigate?.('work-tracking')}
+            title={`Active Timer: ${formatTimerDuration(elapsedSeconds)} (${timerStatus.toUpperCase()})${activeTask ? ` — ${activeTask.title}` : ''}. Click to open Work Tracking.`}
+          >
+            <TimerIcon
+              size={13}
+              style={{
+                animation: timerStatus === 'running' ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
+              }}
+            />
+            <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono, monospace)', fontSize: '12px' }}>
+              {formatTimerDuration(elapsedSeconds)}
+            </span>
+            <span
+              style={{
+                fontSize: '9.5px',
+                textTransform: 'uppercase',
+                padding: '1px 5px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                backgroundColor:
+                  timerStatus === 'running' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {timerStatus === 'running' ? 'LIVE' : 'PAUSED'}
+            </span>
+            {activeTask && (
+              <span
+                style={{
+                  maxWidth: '90px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: '11px',
+                  opacity: 0.85,
+                }}
+              >
+                {activeTask.title}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Quick Pet Companion Status Badge */}
